@@ -2,7 +2,6 @@ import { useState, useRef } from "react";
 import { refractive, convex, lip } from "@hashintel/refractive";
 import { useDrag } from "@use-gesture/react";
 import clsx from "clsx";
-import "./App.css";
 
 /* ─── Utilities ─── */
 
@@ -16,7 +15,7 @@ function rubberBandClamp(val: number, min: number, max: number, limit: number) {
   return val;
 }
 
-const BG = 26; // dark bg #1a1a1a
+const BG = 26;
 function opaqueOn(r: number, g: number, b: number, a: number) {
   return `rgb(${Math.round(BG + (r - BG) * a)},${Math.round(BG + (g - BG) * a)},${Math.round(BG + (b - BG) * a)})`;
 }
@@ -24,6 +23,15 @@ function opaqueOn(r: number, g: number, b: number, a: number) {
 const TRACK_ON = opaqueOn(59, 191, 78, 0.93);
 const TRACK_OFF = opaqueOn(140, 140, 148, 0.5);
 const TRACK_RGBA = { off: [140, 140, 148, 0.5], on: [59, 191, 78, 0.93] };
+
+/* ─── Transitions (too complex for Tailwind utilities) ─── */
+
+const TR_SWITCH = "transform 0.35s cubic-bezier(0.4,0,0.2,1), background-color 0.25s ease, box-shadow 0.25s ease";
+const TR_SWITCH_PRESS = "transform 0.08s ease-out, background-color 0.2s ease, box-shadow 0.2s ease";
+const TR_SLIDER = "transform 0.2s ease, left 0.35s cubic-bezier(0.4,0,0.2,1), background-color 0.25s ease, box-shadow 0.25s ease";
+const TR_SLIDER_SMOOTH = "transform 0.15s ease-out, left 0.35s cubic-bezier(0.4,0,0.2,1), background-color 0.1s ease, box-shadow 0.15s ease";
+const TR_SLIDER_DRAG = "transform 0.08s ease-out, left 0s, background-color 0.1s ease, box-shadow 0.1s ease";
+const TR_FILL = "width 0.35s cubic-bezier(0.4,0,0.2,1)";
 
 /* ─── Refraction parameters ─── */
 
@@ -44,20 +52,30 @@ function useRefractionParams(defaults: ParamValues) {
 
 function Params({ params, set }: ReturnType<typeof useRefractionParams>) {
   return (
-    <div className="params-section">
-      <div className="params-header">
-        <div className="params-title">Parameters</div>
-        <div className="params-line" />
+    <div className="mt-6 flex flex-col gap-2.5 text-[var(--text-80)]">
+      <div className="flex items-center gap-4">
+        <div className="uppercase tracking-[0.14em] text-[10px] opacity-70 select-none whitespace-nowrap">
+          Parameters
+        </div>
+        <div className="h-px flex-1 bg-[var(--ui-border)]" />
       </div>
       {PARAM_CONFIG.map(({ key, label, min, max, step }) => {
         const v = params[key];
         const display = step < 1 ? v.toFixed(2) : step < 10 ? v.toFixed(1) : String(v);
         return (
-          <div key={key} className="param-row">
-            <label className="param-label">{label}</label>
-            <span className="param-value">{display}</span>
-            <input type="range" min={min} max={max} step={step} value={v}
-              onChange={e => set(key)(Number(e.target.value))} className="param-slider" aria-label={label} />
+          <div key={key} className="flex items-center gap-4">
+            <label className="w-56 uppercase tracking-[0.08em] text-[11px] opacity-80 select-none leading-tight shrink-0">
+              {label}
+            </label>
+            <span className="w-14 text-right font-mono tabular-nums text-[11px] text-[var(--text-60)] shrink-0">
+              {display}
+            </span>
+            <input
+              type="range" min={min} max={max} step={step} value={v}
+              onChange={e => set(key)(Number(e.target.value))}
+              className="flex-1"
+              aria-label={label}
+            />
           </div>
         );
       })}
@@ -65,7 +83,7 @@ function Params({ params, set }: ReturnType<typeof useRefractionParams>) {
   );
 }
 
-function refraction(p: ParamValues, extra: object) {
+function refraction(p: ParamValues, extra: { radius: number; bezelWidth: number; bezelHeightFn: (x: number) => number }) {
   return {
     blur: p.blur, glassThickness: p.refraction * 70, refractiveIndex: 1.5,
     specularOpacity: p.specular, ...extra,
@@ -73,6 +91,9 @@ function refraction(p: ParamValues, extra: object) {
 }
 
 /* ═══════════════════════ SWITCH ═══════════════════════ */
+
+const DEMO = "demo-grid-bg h-96 rounded-xl border border-[var(--ui-border)] flex flex-col items-center justify-center relative overflow-hidden";
+const CHECK = "absolute bottom-4 flex items-center gap-1.5 text-xs text-[var(--text-60)] cursor-pointer select-none";
 
 function SwitchDemo() {
   const [active, setActive] = useState(true);
@@ -104,26 +125,32 @@ function SwitchDemo() {
   })();
 
   return (
-    <div className="component-section">
-      <h2 className="section-heading">Switch</h2>
-      <p className="section-description">
+    <div className="grid grid-rows-subgrid row-span-4">
+      <h2 className="text-lg font-semibold mb-1.5">Switch</h2>
+      <p className="text-[0.82rem] opacity-55 mb-3 leading-relaxed">
         This uses a lip bezel, which makes the surface convex on the outside and
         concave in the middle. This makes the center slider zoomed out, while the
         edges refract the inside.
       </p>
-      <div className={clsx("demo-container demo-touch-none", useImage && "demo-image-bg")}>
-        <div {...bind()} className="switch-track" style={{ backgroundColor: trackColor }}>
+      <div className={clsx(DEMO, "touch-none", useImage && "demo-image-bg")}>
+        <div
+          {...bind()}
+          className="w-[160px] h-[67px] rounded-[33.5px] relative cursor-pointer transition-colors duration-300 shadow-[inset_0_2px_6px_rgba(0,0,0,0.35)]"
+          style={{ backgroundColor: trackColor }}
+        >
           <refractive.div
-            className={clsx("switch-thumb", pressed && "switch-thumb-pressed")}
+            className="absolute top-[33.5px] left-0 w-[146px] h-[92px] ml-[-21.95px] pointer-events-none"
             style={{
               transform: `translateX(${displayX}px) translateY(-50%) scale(${pressed ? 1.0 : 0.65})`,
               backgroundColor: pressed ? "rgba(255,255,255,0.15)" : "#fff",
+              boxShadow: pressed ? "0 6px 30px rgba(0,0,0,0.18)" : "0 4px 22px rgba(0,0,0,0.1)",
+              transition: pressed ? TR_SWITCH_PRESS : TR_SWITCH,
             }}
             refraction={refraction(params, { radius: 46, bezelWidth: 18, bezelHeightFn: lip })}
           />
         </div>
-        <label className="demo-checkbox">
-          <input type="checkbox" checked={useImage} onChange={e => setUseImage(e.target.checked)} />
+        <label className={CHECK}>
+          <input type="checkbox" checked={useImage} onChange={e => setUseImage(e.target.checked)} className="accent-indigo-500" />
           Use background image
         </label>
       </div>
@@ -183,34 +210,41 @@ function SliderDemo() {
 
   const thumbLeft = (pressed ? rawPct : value) / 100 * trackWidth;
   const dragging = motionMode === "instant";
-  const thumbMode = pressed ? (dragging ? "dragging" : "smooth") : "";
+  const thumbTransition = pressed
+    ? (dragging ? TR_SLIDER_DRAG : TR_SLIDER_SMOOTH)
+    : TR_SLIDER;
 
   return (
-    <div className="component-section">
-      <h2 className="section-heading">Slider</h2>
-      <p className="section-description">
+    <div className="grid grid-rows-subgrid row-span-4">
+      <h2 className="text-lg font-semibold mb-1.5">Slider</h2>
+      <p className="text-[0.82rem] opacity-55 mb-3 leading-relaxed">
         Slider allows you to see the current level through the glass, while the
         sides refract the background. It uses a convex bezel.
       </p>
-      <div className={clsx("demo-container", useImage && "demo-image-bg")}>
-        <div {...bind()} className="slider-wrapper" ref={wrapperRef}>
-          <div className="slider-track">
-            <div className="slider-track-inner">
-              <div className={clsx("slider-fill", dragging && "slider-fill-dragging")} style={{ width: `${value}%` }} />
+      <div className={clsx(DEMO, useImage && "demo-image-bg")}>
+        <div {...bind()} className="relative w-[330px] h-[60px] cursor-pointer touch-none" ref={wrapperRef}>
+          <div className="absolute left-0 top-[23px] w-[330px] h-[14px] pointer-events-none">
+            <div className="w-full h-full bg-[rgb(90,90,93)] rounded-[7px] overflow-hidden shadow-[inset_0_1px_4px_rgba(0,0,0,0.4)]">
+              <div
+                className="h-full rounded-[6px] bg-[#0377f7] pointer-events-none"
+                style={{ width: `${value}%`, transition: dragging ? "width 0s" : TR_FILL }}
+              />
             </div>
           </div>
           <refractive.div
-            className={clsx("slider-thumb", thumbMode && `slider-thumb-${thumbMode}`, pressed && "slider-thumb-active")}
+            className="absolute top-0 w-[90px] h-[60px] ml-[-45px] pointer-events-auto cursor-pointer"
             style={{
               left: `${thumbLeft}px`,
               transform: `scale(${pressed ? 0.9 : 0.6})`,
               backgroundColor: pressed ? "rgba(255,255,255,0.12)" : "#fff",
+              boxShadow: pressed ? "0 5px 24px rgba(0,0,0,0.16)" : "0 3px 14px rgba(0,0,0,0.1)",
+              transition: thumbTransition,
             }}
             refraction={refraction(params, { radius: 30, bezelWidth: 14, bezelHeightFn: convex })}
           />
         </div>
-        <label className="demo-checkbox">
-          <input type="checkbox" checked={useImage} onChange={e => setUseImage(e.target.checked)} />
+        <label className={CHECK}>
+          <input type="checkbox" checked={useImage} onChange={e => setUseImage(e.target.checked)} className="accent-indigo-500" />
           Use background image
         </label>
       </div>
@@ -223,24 +257,48 @@ function SliderDemo() {
 
 export default function App() {
   return (
-    <div className="app dark">
-      <header className="app-header">
-        <h1>Liquid Glass Components</h1>
-        <p className="subtitle">
-          Recreating Apple's WWDC 2025 Liquid Glass effect with{" "}
-          <a href="https://github.com/hashintel/hash/tree/main/libs/%40hashintel/refractive" target="_blank" rel="noreferrer">
-            @hashintel/refractive
+    <div className="dark min-h-screen bg-[var(--bg2)] text-[var(--c-text)] font-sans">
+      <header className="text-center pt-12 px-6 pb-3">
+        <h1 className="text-[2rem] font-bold mb-2">Liquid Glass Components</h1>
+        <p className="text-sm opacity-60 mb-3">
+          Recreating Apple's WWDC 2025 Liquid Glass effect — inspired by{" "}
+          <a href="https://kube.io/blog/liquid-glass-css-svg" target="_blank" rel="noreferrer"
+            className="text-inherit underline underline-offset-2">
+            kube.io
           </a>
         </p>
-        <p className="chrome-badge">Chrome / Chromium only</p>
       </header>
-      <main className="app-main">
+      <main className="grid grid-cols-2 gap-x-8 gap-y-4 max-w-[1400px] mx-auto px-6 pb-16 relative before:content-[''] before:absolute before:top-0 before:bottom-0 before:left-1/2 before:w-px before:bg-[var(--ui-border)]">
+        <div className="text-[0.8rem] font-semibold uppercase tracking-[0.08em] opacity-50 mb-6">
+          Custom Implementation
+        </div>
+        <div className="text-[0.8rem] font-semibold uppercase tracking-[0.08em] opacity-50 mb-6">
+          Using{" "}
+          <a href="https://github.com/hashintel/hash/tree/main/libs/%40hashintel/refractive" target="_blank" rel="noreferrer"
+            className="text-inherit underline">
+            @hashintel/refractive
+          </a>
+          {" "}<span className="inline-block text-[0.7rem] bg-yellow-500/15 border border-yellow-500/30 text-yellow-600 dark:text-amber-400 px-2.5 py-0.5 rounded-[5px] tracking-[0.02em] normal-case">Chrome only</span>
+        </div>
+
+        <div className="grid grid-rows-subgrid row-span-4">
+          <h2 className="text-lg font-semibold mb-1.5">Switch</h2>
+          <p className="text-[0.82rem] opacity-55 mb-3 leading-relaxed">Custom liquid glass switch (coming soon)</p>
+          <div className={clsx(DEMO)} />
+          <div />
+        </div>
         <SwitchDemo />
+
+        <div className="grid grid-rows-subgrid row-span-4">
+          <h2 className="text-lg font-semibold mb-1.5">Slider</h2>
+          <p className="text-[0.82rem] opacity-55 mb-3 leading-relaxed">Custom liquid glass slider (coming soon)</p>
+          <div className={clsx(DEMO)} />
+          <div />
+        </div>
         <SliderDemo />
       </main>
-      <footer className="app-footer">
-        Based on{" "}
-        <a href="https://kube.io/blog/liquid-glass-css-svg" target="_blank" rel="noreferrer">kube.io</a>
+      <footer className="text-center py-5 px-6 text-xs opacity-40 border-t border-[var(--ui-border)]">
+        Johann Berger · 2025
       </footer>
     </div>
   );
