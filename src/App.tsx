@@ -22,6 +22,9 @@ function opaqueOn(r: number, g: number, b: number, a: number) {
   return `rgb(${Math.round(BG + (r - BG) * a)},${Math.round(BG + (g - BG) * a)},${Math.round(BG + (b - BG) * a)})`;
 }
 
+const TRACK_ON = opaqueOn(59, 191, 78, 0.93);
+const TRACK_OFF = opaqueOn(120, 120, 128, 0.32);
+
 /* ─── UI helpers ─── */
 
 function ParamRow({ label, value, min, max, step, onChange }: {
@@ -62,11 +65,8 @@ function SwitchDemo() {
   const params = useRefractionParams({ specular: 0.5, refraction: 1.0, blur: 0.2 });
 
   const maxX = 57.9;
-  const isOn = active;
-  const dragged = useRef(false);
 
-  const bind = useDrag(({ down, movement: [mx], first }) => {
-    if (first) dragged.current = false;
+  const bind = useDrag(({ down, movement: [mx] }) => {
     setPressed(down);
 
     if (!down) {
@@ -77,7 +77,6 @@ function SwitchDemo() {
       return;
     }
 
-    dragged.current = true;
     const startX = active ? maxX : 0;
     const raw = startX + mx;
     const x = raw < 0 ? -rubberBand(-raw, 40)
@@ -86,12 +85,12 @@ function SwitchDemo() {
     setThumbX(x);
   }, { pointer: { capture: true } });
 
-  const displayX = pressed ? thumbX : isOn ? maxX : 0;
+  const displayX = pressed ? thumbX : active ? maxX : 0;
 
   const trackColor = (() => {
     const ratio = Math.max(0, Math.min(1, displayX / maxX));
     if (!pressed) {
-      return isOn ? opaqueOn(59, 191, 78, 0.93) : opaqueOn(120, 120, 128, 0.32);
+      return active ? TRACK_ON : TRACK_OFF;
     }
     const r = Math.round(120 + (59 - 120) * ratio);
     const g = Math.round(120 + (191 - 120) * ratio);
@@ -193,12 +192,8 @@ function SliderDemo() {
   const thumbLeft = (pressed ? rawPct : value) / 100 * trackWidth;
   const scale = pressed ? 0.9 : 0.6;
   const bg = pressed ? "rgba(255,255,255,0.12)" : "rgba(255,255,255,1)";
-
-  const smooth = "transform 0.15s ease-out, left 0.35s cubic-bezier(0.4,0,0.2,1), background-color 0.1s ease, box-shadow 0.15s ease";
-  const instant = "transform 0.08s ease-out, left 0s, background-color 0.1s ease, box-shadow 0.1s ease";
-  const rest = "transform 0.2s ease, left 0.35s cubic-bezier(0.4,0,0.2,1), background-color 0.25s ease, box-shadow 0.25s ease";
-  const thumbTransition = pressed ? (motionMode === "instant" ? instant : smooth) : rest;
-  const fillTransition = motionMode === "instant" ? "width 0s" : "width 0.35s cubic-bezier(0.4,0,0.2,1)";
+  const thumbMode = pressed ? (motionMode === "instant" ? "dragging" : "smooth") : "";
+  const fillClass = `slider-fill${motionMode === "instant" ? " slider-fill-dragging" : ""}`;
 
   return (
     <div className="component-section">
@@ -211,12 +206,12 @@ function SliderDemo() {
         <div {...bind()} className="slider-wrapper" ref={wrapperRef}>
           <div className="slider-track">
             <div className="slider-track-inner">
-              <div className="slider-fill" style={{ width: `${value}%`, transition: fillTransition }} />
+              <div className={fillClass} style={{ width: `${value}%` }} />
             </div>
           </div>
           <refractive.div
-            className={`slider-thumb${pressed ? " slider-thumb-active" : ""}`}
-            style={{ left: `${thumbLeft}px`, transform: `scale(${scale})`, backgroundColor: bg, transition: thumbTransition }}
+            className={`slider-thumb${thumbMode ? ` slider-thumb-${thumbMode}` : ""}${pressed ? " slider-thumb-active" : ""}`}
+            style={{ left: `${thumbLeft}px`, transform: `scale(${scale})`, backgroundColor: bg }}
             refraction={{
               radius: 30, blur: params.blurLevel, bezelWidth: 14,
               glassThickness: params.refractionLevel * 70, refractiveIndex: 1.5,

@@ -157,53 +157,6 @@
   accent-color: #6366f1;
 }
 
-/* ══════════════ SEARCHBOX ══════════════ */
-.searchbox-wrapper {
-  position: relative;
-  width: 420px;
-  height: 56px;
-  transform: scale(0.8);
-}
-
-.searchbox-glass {
-  position: absolute;
-  inset: 0;
-  background-color: rgba(255, 255, 255, 0.05);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.16);
-}
-
-.searchbox-content {
-  position: relative;
-  z-index: 1;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  height: 100%;
-  padding: 0 20px;
-  pointer-events: none;
-  color: var(--text);
-}
-
-.search-icon {
-  opacity: 0.6;
-  flex-shrink: 0;
-}
-
-.search-input {
-  flex: 1;
-  background: none;
-  border: none;
-  outline: none;
-  color: var(--text);
-  font-size: 16px;
-  font-family: inherit;
-  pointer-events: auto;
-}
-
-.search-input::placeholder {
-  color: var(--text-60);
-}
-
 /* ══════════════ SWITCH ══════════════ */
 .switch-track {
   width: 160px;
@@ -267,6 +220,11 @@
   border-radius: 6px;
   background-color: #0377f7;
   pointer-events: none;
+  transition: width 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.slider-fill-dragging {
+  transition: width 0s;
 }
 
 .slider-thumb {
@@ -279,6 +237,18 @@
   box-shadow: 0 3px 14px rgba(0, 0, 0, 0.1);
   pointer-events: auto;
   cursor: pointer;
+  transition: transform 0.2s ease, left 0.35s cubic-bezier(0.4, 0, 0.2, 1),
+              background-color 0.25s ease, box-shadow 0.25s ease;
+}
+
+.slider-thumb-smooth {
+  transition: transform 0.15s ease-out, left 0.35s cubic-bezier(0.4, 0, 0.2, 1),
+              background-color 0.1s ease, box-shadow 0.15s ease;
+}
+
+.slider-thumb-dragging {
+  transition: transform 0.08s ease-out, left 0s,
+              background-color 0.1s ease, box-shadow 0.1s ease;
 }
 
 .slider-thumb-active {
