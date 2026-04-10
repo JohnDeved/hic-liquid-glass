@@ -22,8 +22,8 @@ function opaqueOn(r: number, g: number, b: number, a: number) {
 }
 
 const TRACK_ON = opaqueOn(59, 191, 78, 0.93);
-const TRACK_OFF = opaqueOn(120, 120, 128, 0.32);
-const TRACK_RGBA = { off: [120, 120, 128, 0.32], on: [59, 191, 78, 0.93] };
+const TRACK_OFF = opaqueOn(140, 140, 148, 0.5);
+const TRACK_RGBA = { off: [140, 140, 148, 0.5], on: [59, 191, 78, 0.93] };
 
 /* ─── Refraction parameters ─── */
 
