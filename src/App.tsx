@@ -1,58 +1,75 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useRef } from "react";
 import { refractive, convex, lip } from "@hashintel/refractive";
 import { useDrag } from "@use-gesture/react";
+import clsx from "clsx";
 import "./App.css";
 
-/* ─── Shared hooks ─── */
-
-function useRefractionParams(defaults: { specular: number; refraction: number; blur: number }) {
-  const [specularOpacity, setSpecularOpacity] = useState(defaults.specular);
-  const [refractionLevel, setRefractionLevel] = useState(defaults.refraction);
-  const [blurLevel, setBlurLevel] = useState(defaults.blur);
-  return { specularOpacity, setSpecularOpacity, refractionLevel, setRefractionLevel, blurLevel, setBlurLevel };
-}
+/* ─── Utilities ─── */
 
 function rubberBand(overshoot: number, limit: number) {
   return limit * (1 - Math.exp(-overshoot / limit));
 }
 
-// Composite rgba onto dark bg (#1a1a1a) to get an opaque equivalent
-const BG = 26; // #1a1a1a
+function rubberBandClamp(val: number, min: number, max: number, limit: number) {
+  if (val < min) return min - rubberBand(min - val, limit);
+  if (val > max) return max + rubberBand(val - max, limit);
+  return val;
+}
+
+const BG = 26; // dark bg #1a1a1a
 function opaqueOn(r: number, g: number, b: number, a: number) {
   return `rgb(${Math.round(BG + (r - BG) * a)},${Math.round(BG + (g - BG) * a)},${Math.round(BG + (b - BG) * a)})`;
 }
 
 const TRACK_ON = opaqueOn(59, 191, 78, 0.93);
 const TRACK_OFF = opaqueOn(120, 120, 128, 0.32);
+const TRACK_RGBA = { off: [120, 120, 128, 0.32], on: [59, 191, 78, 0.93] };
 
-/* ─── UI helpers ─── */
+/* ─── Refraction parameters ─── */
 
-function ParamRow({ label, value, min, max, step, onChange }: {
-  label: string; value: number; min: number; max: number; step: number; onChange: (v: number) => void;
-}) {
-  const display = step < 1 ? value.toFixed(2) : step < 10 ? value.toFixed(1) : String(value);
-  return (
-    <div className="param-row">
-      <label className="param-label">{label}</label>
-      <span className="param-value">{display}</span>
-      <input type="range" min={min} max={max} step={step} value={value}
-        onChange={e => onChange(Number(e.target.value))} className="param-slider" aria-label={label} />
-    </div>
-  );
+const PARAM_CONFIG = [
+  { key: "specular", label: "Specular Opacity", min: 0, max: 1, step: 0.01 },
+  { key: "refraction", label: "Refraction Level", min: 0, max: 1, step: 0.01 },
+  { key: "blur", label: "Blur Level", min: 0, max: 40, step: 0.1 },
+] as const;
+
+type ParamKey = (typeof PARAM_CONFIG)[number]["key"];
+type ParamValues = Record<ParamKey, number>;
+
+function useRefractionParams(defaults: ParamValues) {
+  const [params, setParams] = useState(defaults);
+  const set = (key: ParamKey) => (v: number) => setParams(p => ({ ...p, [key]: v }));
+  return { params, set };
 }
 
-function Params({ params }: { params: ReturnType<typeof useRefractionParams> }) {
+function Params({ params, set }: ReturnType<typeof useRefractionParams>) {
   return (
     <div className="params-section">
       <div className="params-header">
         <div className="params-title">Parameters</div>
         <div className="params-line" />
       </div>
-      <ParamRow label="Specular Opacity" value={params.specularOpacity} min={0} max={1} step={0.01} onChange={params.setSpecularOpacity} />
-      <ParamRow label="Refraction Level" value={params.refractionLevel} min={0} max={1} step={0.01} onChange={params.setRefractionLevel} />
-      <ParamRow label="Blur Level" value={params.blurLevel} min={0} max={40} step={0.1} onChange={params.setBlurLevel} />
+      {PARAM_CONFIG.map(({ key, label, min, max, step }) => {
+        const v = params[key];
+        const display = step < 1 ? v.toFixed(2) : step < 10 ? v.toFixed(1) : String(v);
+        return (
+          <div key={key} className="param-row">
+            <label className="param-label">{label}</label>
+            <span className="param-value">{display}</span>
+            <input type="range" min={min} max={max} step={step} value={v}
+              onChange={e => set(key)(Number(e.target.value))} className="param-slider" aria-label={label} />
+          </div>
+        );
+      })}
     </div>
   );
+}
+
+function refraction(p: ParamValues, extra: object) {
+  return {
+    blur: p.blur, glassThickness: p.refraction * 70, refractiveIndex: 1.5,
+    specularOpacity: p.specular, ...extra,
+  };
 }
 
 /* ═══════════════════════ SWITCH ═══════════════════════ */
@@ -62,45 +79,29 @@ function SwitchDemo() {
   const [useImage, setUseImage] = useState(false);
   const [pressed, setPressed] = useState(false);
   const [thumbX, setThumbX] = useState(0);
-  const params = useRefractionParams({ specular: 0.5, refraction: 1.0, blur: 0.2 });
+  const { params, set } = useRefractionParams({ specular: 0.5, refraction: 1.0, blur: 0.2 });
 
   const maxX = 57.9;
 
   const bind = useDrag(({ down, movement: [mx] }) => {
     setPressed(down);
-
     if (!down) {
       if (Math.abs(mx) < 5) { setActive(a => !a); return; }
-      const startX = active ? maxX : 0;
-      const clamped = Math.max(0, Math.min(maxX, startX + mx));
+      const clamped = Math.max(0, Math.min(maxX, (active ? maxX : 0) + mx));
       setActive(clamped > maxX / 2);
       return;
     }
-
-    const startX = active ? maxX : 0;
-    const raw = startX + mx;
-    const x = raw < 0 ? -rubberBand(-raw, 40)
-      : raw > maxX ? maxX + rubberBand(raw - maxX, 40)
-      : raw;
-    setThumbX(x);
+    setThumbX(rubberBandClamp((active ? maxX : 0) + mx, 0, maxX, 40));
   }, { pointer: { capture: true } });
 
   const displayX = pressed ? thumbX : active ? maxX : 0;
+  const ratio = Math.max(0, Math.min(1, displayX / maxX));
 
   const trackColor = (() => {
-    const ratio = Math.max(0, Math.min(1, displayX / maxX));
-    if (!pressed) {
-      return active ? TRACK_ON : TRACK_OFF;
-    }
-    const r = Math.round(120 + (59 - 120) * ratio);
-    const g = Math.round(120 + (191 - 120) * ratio);
-    const b = Math.round(128 + (78 - 128) * ratio);
-    const a = 0.32 + 0.61 * ratio;
-    return opaqueOn(r, g, b, a);
+    if (!pressed) return active ? TRACK_ON : TRACK_OFF;
+    const [r, g, b, a] = TRACK_RGBA.off.map((v, i) => v + (TRACK_RGBA.on[i] - v) * ratio);
+    return opaqueOn(Math.round(r), Math.round(g), Math.round(b), a);
   })();
-
-  const scale = pressed ? 1.0 : 0.65;
-  const bg = pressed ? "rgba(255,255,255,0.15)" : "rgba(255,255,255,1)";
 
   return (
     <div className="component-section">
@@ -110,19 +111,15 @@ function SwitchDemo() {
         concave in the middle. This makes the center slider zoomed out, while the
         edges refract the inside.
       </p>
-      <div className={`demo-container demo-touch-none${useImage ? " demo-image-bg" : ""}`}>
+      <div className={clsx("demo-container demo-touch-none", useImage && "demo-image-bg")}>
         <div {...bind()} className="switch-track" style={{ backgroundColor: trackColor }}>
           <refractive.div
-            className={`switch-thumb${pressed ? " switch-thumb-pressed" : ""}`}
+            className={clsx("switch-thumb", pressed && "switch-thumb-pressed")}
             style={{
-              transform: `translateX(${displayX}px) translateY(-50%) scale(${scale})`,
-              backgroundColor: bg,
+              transform: `translateX(${displayX}px) translateY(-50%) scale(${pressed ? 1.0 : 0.65})`,
+              backgroundColor: pressed ? "rgba(255,255,255,0.15)" : "#fff",
             }}
-            refraction={{
-              radius: 46, blur: params.blurLevel, bezelWidth: 18,
-              glassThickness: params.refractionLevel * 70, refractiveIndex: 1.5,
-              specularOpacity: params.specularOpacity, bezelHeightFn: lip,
-            }}
+            refraction={refraction(params, { radius: 46, bezelWidth: 18, bezelHeightFn: lip })}
           />
         </div>
         <label className="demo-checkbox">
@@ -130,7 +127,7 @@ function SwitchDemo() {
           Use background image
         </label>
       </div>
-      <Params params={params} />
+      <Params params={params} set={set} />
     </div>
   );
 }
@@ -142,18 +139,16 @@ function SliderDemo() {
   const [pressed, setPressed] = useState(false);
   const [useImage, setUseImage] = useState(false);
   const [motionMode, setMotionMode] = useState<"smooth" | "instant">("smooth");
-  const params = useRefractionParams({ specular: 0.4, refraction: 1.0, blur: 0 });
+  const { params, set } = useRefractionParams({ specular: 0.4, refraction: 1.0, blur: 0 });
   const wrapperRef = useRef<HTMLDivElement>(null);
   const releaseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const trackWidth = 330;
 
-  const pctFromClient = useCallback((clientX: number) => {
-    const el = wrapperRef.current;
-    if (!el) return value;
-    const rect = el.getBoundingClientRect();
+  const pctFromClient = (clientX: number) => {
+    const rect = wrapperRef.current!.getBoundingClientRect();
     return ((clientX - rect.left) / rect.width) * 100;
-  }, [value]);
+  };
 
   const [rawPct, setRawPct] = useState(10);
 
@@ -171,10 +166,7 @@ function SliderDemo() {
 
     if (!first && down) {
       const pct = pctFromClient(x);
-      const display = pct < 0 ? -(rubberBand(-pct, 8) / 100) * 100
-        : pct > 100 ? 100 + (rubberBand(pct - 100, 8) / 100) * 100
-        : pct;
-      setRawPct(display);
+      setRawPct(rubberBandClamp(pct, 0, 100, 8));
       setValue(Math.round(Math.max(0, Math.min(100, pct))));
     }
 
@@ -190,10 +182,8 @@ function SliderDemo() {
   }, { pointer: { capture: true } });
 
   const thumbLeft = (pressed ? rawPct : value) / 100 * trackWidth;
-  const scale = pressed ? 0.9 : 0.6;
-  const bg = pressed ? "rgba(255,255,255,0.12)" : "rgba(255,255,255,1)";
-  const thumbMode = pressed ? (motionMode === "instant" ? "dragging" : "smooth") : "";
-  const fillClass = `slider-fill${motionMode === "instant" ? " slider-fill-dragging" : ""}`;
+  const dragging = motionMode === "instant";
+  const thumbMode = pressed ? (dragging ? "dragging" : "smooth") : "";
 
   return (
     <div className="component-section">
@@ -202,21 +192,21 @@ function SliderDemo() {
         Slider allows you to see the current level through the glass, while the
         sides refract the background. It uses a convex bezel.
       </p>
-      <div className={`demo-container${useImage ? " demo-image-bg" : ""}`}>
+      <div className={clsx("demo-container", useImage && "demo-image-bg")}>
         <div {...bind()} className="slider-wrapper" ref={wrapperRef}>
           <div className="slider-track">
             <div className="slider-track-inner">
-              <div className={fillClass} style={{ width: `${value}%` }} />
+              <div className={clsx("slider-fill", dragging && "slider-fill-dragging")} style={{ width: `${value}%` }} />
             </div>
           </div>
           <refractive.div
-            className={`slider-thumb${thumbMode ? ` slider-thumb-${thumbMode}` : ""}${pressed ? " slider-thumb-active" : ""}`}
-            style={{ left: `${thumbLeft}px`, transform: `scale(${scale})`, backgroundColor: bg }}
-            refraction={{
-              radius: 30, blur: params.blurLevel, bezelWidth: 14,
-              glassThickness: params.refractionLevel * 70, refractiveIndex: 1.5,
-              specularOpacity: params.specularOpacity, bezelHeightFn: convex,
+            className={clsx("slider-thumb", thumbMode && `slider-thumb-${thumbMode}`, pressed && "slider-thumb-active")}
+            style={{
+              left: `${thumbLeft}px`,
+              transform: `scale(${pressed ? 0.9 : 0.6})`,
+              backgroundColor: pressed ? "rgba(255,255,255,0.12)" : "#fff",
             }}
+            refraction={refraction(params, { radius: 30, bezelWidth: 14, bezelHeightFn: convex })}
           />
         </div>
         <label className="demo-checkbox">
@@ -224,7 +214,7 @@ function SliderDemo() {
           Use background image
         </label>
       </div>
-      <Params params={params} />
+      <Params params={params} set={set} />
     </div>
   );
 }
