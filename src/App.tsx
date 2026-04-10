@@ -274,6 +274,11 @@ function SliderDemo() {
   const [blurLevel, setBlurLevel] = useState(0);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const dragging = useRef(false);
+  const hasMoved = useRef(false);
+  const startClientX = useRef(0);
+  const releaseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // "smooth" = animate left (click-to-position), "instant" = no transition (dragging)
+  const [motionMode, setMotionMode] = useState<"smooth" | "instant">("smooth");
 
   const [rawPct, setRawPct] = useState(10);
   const rawPctRef = useRef(10);
@@ -289,10 +294,16 @@ function SliderDemo() {
 
   const onPointerDown = useCallback(
     (e: React.PointerEvent) => {
+      if (releaseTimer.current) {
+        clearTimeout(releaseTimer.current);
+        releaseTimer.current = null;
+      }
       dragging.current = true;
-      // Always capture on the wrapper element
+      hasMoved.current = false;
+      startClientX.current = e.clientX;
       wrapperRef.current?.setPointerCapture(e.pointerId);
       setPressed(true);
+      setMotionMode("smooth");
       const pct = calcPct(e.clientX);
       const clamped = Math.max(0, Math.min(100, pct));
       setValue(Math.round(clamped));
@@ -305,6 +316,10 @@ function SliderDemo() {
   const onPointerMove = useCallback(
     (e: React.PointerEvent) => {
       if (!dragging.current) return;
+      // Only switch to instant mode after significant movement (5px threshold)
+      if (!hasMoved.current && Math.abs(e.clientX - startClientX.current) < 5) return;
+      hasMoved.current = true;
+      setMotionMode("instant");
       const pct = calcPct(e.clientX);
       let displayPct: number;
       if (pct < 0) {
@@ -322,12 +337,21 @@ function SliderDemo() {
   );
 
   const onPointerUp = useCallback(() => {
+    const didMove = hasMoved.current;
     dragging.current = false;
-    setPressed(false);
-    // Snap back from rubber band
+    hasMoved.current = false;
+    setMotionMode("smooth");
     const clamped = Math.max(0, Math.min(100, rawPctRef.current));
     rawPctRef.current = clamped;
     setRawPct(clamped);
+    if (didMove) {
+      setPressed(false);
+    } else {
+      releaseTimer.current = setTimeout(() => {
+        setPressed(false);
+        releaseTimer.current = null;
+      }, 400);
+    }
   }, []);
 
   const displayPct = dragging.current ? rawPct : value;
@@ -336,6 +360,16 @@ function SliderDemo() {
   const thumbBg = pressed
     ? "rgba(255, 255, 255, 0.12)"
     : "rgba(255, 255, 255, 1)";
+
+  const smoothTransition = "transform 0.15s ease-out, left 0.35s cubic-bezier(0.4,0,0.2,1), background-color 0.1s ease, box-shadow 0.15s ease";
+  const instantTransition = "transform 0.08s ease-out, left 0s, background-color 0.1s ease, box-shadow 0.1s ease";
+  const restTransition = "transform 0.2s ease, left 0.35s cubic-bezier(0.4,0,0.2,1), background-color 0.25s ease, box-shadow 0.25s ease";
+
+  const thumbTransition = pressed
+    ? (motionMode === "instant" ? instantTransition : smoothTransition)
+    : restTransition;
+
+  const fillTransition = motionMode === "instant" ? "width 0s" : "width 0.35s cubic-bezier(0.4,0,0.2,1)";
 
   return (
     <div className="component-section">
@@ -356,19 +390,20 @@ function SliderDemo() {
             <div className="slider-track-inner">
               <div
                 className="slider-fill"
-                style={{ width: value + "%" }}
+                style={{ width: value + "%", transition: fillTransition }}
               />
             </div>
           </div>
           <refractive.div
             className={
-              "slider-thumb" + (pressed ? " slider-thumb-pressed" : "")
+              "slider-thumb" + (pressed ? " slider-thumb-active" : "")
             }
             onPointerDown={onPointerDown}
             style={{
               left: thumbLeft + "px",
               transform: "scale(" + thumbScale + ")",
               backgroundColor: thumbBg,
+              transition: thumbTransition,
             }}
             refraction={{
               radius: 30,

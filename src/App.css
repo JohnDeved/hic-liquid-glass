@@ -279,17 +279,9 @@
   box-shadow: 0 3px 14px rgba(0, 0, 0, 0.1);
   pointer-events: auto;
   cursor: pointer;
-  transition: transform 0.2s ease,
-              left 0.35s cubic-bezier(0.4, 0, 0.2, 1),
-              background-color 0.25s ease,
-              box-shadow 0.25s ease;
 }
 
-.slider-thumb-pressed {
-  transition: transform 0.08s ease-out,
-              left 0s,
-              background-color 0.2s ease,
-              box-shadow 0.2s ease;
+.slider-thumb-active {
   box-shadow: 0 5px 24px rgba(0, 0, 0, 0.16);
 }
 
