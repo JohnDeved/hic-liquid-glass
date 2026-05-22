@@ -5,25 +5,34 @@ import type { GlassRefractionParams } from "./GlassRect";
 import fragShader from "../shaders/glass.frag?raw";
 
 /**
- * Option-D glass primitive.
- *
- * The thumb is a REAL visible <div> with all its CSS chrome (bg-color,
- * box-shadow, border-radius, transform) — so position, scale, color, and
- * shadow animate on the compositor thread, identical to <refractive.div>.
- *
- * Refraction is rendered by a child <canvas> (absolute inset-0, pointer-
- * events:none) that runs a tiny WebGL shader. The shader samples a
- * texture of the nearest `[data-glass-stage]` ancestor (raster'd via the
- * three-html-render polyfill, triggered only when the stage's DOM
- * actually mutates) and applies the bezel displacement.
- *
- * Per frame we only measure the host's bbox relative to the stage and
- * update UV uniforms — no JS-driven position/scale/color animation,
- * no per-frame raster, no overlay-canvas dance.
+ * Real CSS-styled <div> + child <canvas> that paints only the bezel
+ * refraction. Samples a texture of the nearest `[data-glass-stage]`
+ * ancestor (raster'd via three-html-render's polyfill, on mutation only).
+ * Per frame we just re-measure the host bbox and push uniforms — no
+ * JS-driven position/color animation, no per-frame raster.
  */
 interface Props extends HTMLAttributes<HTMLDivElement> {
   refraction: GlassRefractionParams;
 }
+
+const VERT = `
+  attribute vec2 a_position;
+  attribute vec2 a_uv;
+  varying vec2 vUv;
+  void main() { vUv = a_uv; gl_Position = vec4(a_position, 0.0, 1.0); }
+`;
+
+const QUAD = new Float32Array([
+  -1, -1, 0, 0,  1, -1, 1, 0,  -1, 1, 0, 1,
+  -1,  1, 0, 1,  1, -1, 1, 0,   1, 1, 1, 1,
+]);
+
+const UNIFORM_NAMES = [
+  "sceneTex", "resolution", "stageSize", "canvasCenter", "glassSize",
+  "thumbPos", "cornerRadius", "bezelWidth", "glassThickness", "ior",
+  "blurAmount", "specularOpacity", "bezelType", "bgColor",
+] as const;
+type UniformName = typeof UNIFORM_NAMES[number];
 
 export function DisplacementGlass({ refraction, className, style, ...rest }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
@@ -39,74 +48,29 @@ export function DisplacementGlass({ refraction, className, style, ...rest }: Pro
     if (!stage) return;
 
     const gl = canvas.getContext("webgl", {
-      alpha: true,
-      premultipliedAlpha: false,
-      antialias: false,
-      depth: false,
-      stencil: false,
-      preserveDrawingBuffer: false,
+      alpha: true, premultipliedAlpha: false, antialias: false,
+      depth: false, stencil: false, preserveDrawingBuffer: false,
     });
     if (!gl) return;
 
-    /* ── Shader program ──
-       Inline vertex shader: the existing glass.vert relies on
-       Three.js-injected matrices/attributes; here we draw a fullscreen
-       quad directly in clip space so the bezel sampling math in
-       glass.frag (which only uses vUv 0..1) works unchanged. */
-    const vs = `
-      attribute vec2 a_position;
-      attribute vec2 a_uv;
-      varying vec2 vUv;
-      void main() {
-        vUv = a_uv;
-        gl_Position = vec4(a_position, 0.0, 1.0);
-      }
-    `;
-    const program = createProgram(gl, vs, fragShader);
+    const program = createProgram(gl, VERT, fragShader);
     if (!program) return;
     gl.useProgram(program);
 
-    const aPos = gl.getAttribLocation(program, "a_position");
-    const aUv = gl.getAttribLocation(program, "a_uv");
-    const u = {
-      sceneTex: gl.getUniformLocation(program, "sceneTex"),
-      resolution: gl.getUniformLocation(program, "resolution"),
-      stageSize: gl.getUniformLocation(program, "stageSize"),
-      canvasCenter: gl.getUniformLocation(program, "canvasCenter"),
-      glassSize: gl.getUniformLocation(program, "glassSize"),
-      thumbPos: gl.getUniformLocation(program, "thumbPos"),
-      cornerRadius: gl.getUniformLocation(program, "cornerRadius"),
-      bezelWidth: gl.getUniformLocation(program, "bezelWidth"),
-      glassThickness: gl.getUniformLocation(program, "glassThickness"),
-      ior: gl.getUniformLocation(program, "ior"),
-      blurAmount: gl.getUniformLocation(program, "blurAmount"),
-      specularOpacity: gl.getUniformLocation(program, "specularOpacity"),
-      bezelType: gl.getUniformLocation(program, "bezelType"),
-      bgColor: gl.getUniformLocation(program, "bgColor"),
-    };
+    const u = Object.fromEntries(
+      UNIFORM_NAMES.map((n) => [n, gl.getUniformLocation(program, n)]),
+    ) as Record<UniformName, WebGLUniformLocation | null>;
 
-    /* Fullscreen quad covering the canvas (vUv 0..1). Matches GlassThumb. */
     const buf = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, buf);
-    gl.bufferData(
-      gl.ARRAY_BUFFER,
-      // x, y, u, v
-      new Float32Array([
-        -1, -1, 0, 0,
-        1, -1, 1, 0,
-        -1, 1, 0, 1,
-        -1, 1, 0, 1,
-        1, -1, 1, 0,
-        1, 1, 1, 1,
-      ]),
-      gl.STATIC_DRAW,
-    );
+    gl.bufferData(gl.ARRAY_BUFFER, QUAD, gl.STATIC_DRAW);
+    const aPos = gl.getAttribLocation(program, "a_position");
+    const aUv = gl.getAttribLocation(program, "a_uv");
     gl.enableVertexAttribArray(aPos);
     gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 16, 0);
     gl.enableVertexAttribArray(aUv);
     gl.vertexAttribPointer(aUv, 2, gl.FLOAT, false, 16, 8);
 
-    /* ── Texture ── */
     const tex = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, tex);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
@@ -118,53 +82,36 @@ export function DisplacementGlass({ refraction, className, style, ...rest }: Pro
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
 
-    /* ── State ── */
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    let lastW = 0;
-    let lastH = 0;
-    let texSourceW = 0;
-    let texSourceH = 0;
-    let frameRaf = 0;
-    let renderPending = false;
+    let lastW = 0, lastH = 0, texW = 0, texH = 0;
+    let frameRaf = 0, renderPending = false;
     const bg = { r: 1, g: 1, b: 1, a: 1 };
 
     const draw = () => {
       renderPending = false;
-      const hostRect = host.getBoundingClientRect();
-      const stageRect = stage.getBoundingClientRect();
-      const w = hostRect.width;
-      const h = hostRect.height;
-      if (w <= 0 || h <= 0) return;
+      const hr = host.getBoundingClientRect();
+      const sr = stage.getBoundingClientRect();
+      if (hr.width <= 0 || hr.height <= 0) return;
 
-      // Resize canvas backing store on host size change. Use the LAYOUT
-      // size (offsetWidth/Height) so the canvas matches the host in CSS
-      // pixels regardless of the CSS scale transform.
-      const layoutW = host.offsetWidth;
-      const layoutH = host.offsetHeight;
+      const layoutW = host.offsetWidth, layoutH = host.offsetHeight;
       const bw = Math.max(1, Math.round(layoutW * dpr));
       const bh = Math.max(1, Math.round(layoutH * dpr));
       if (bw !== lastW || bh !== lastH) {
-        canvas.width = bw;
-        canvas.height = bh;
-        lastW = bw;
-        lastH = bh;
+        canvas.width = bw; canvas.height = bh;
+        lastW = bw; lastH = bh;
       }
       gl.viewport(0, 0, bw, bh);
 
-      // Read bg-color live each frame (CSS transitions animate it on the
-      // compositor; getComputedStyle returns the current interpolated
-      // value, so the shader tracks it without any JS-side easing).
+      // CSS transitions animate bg-color on the compositor; reading
+      // computedStyle each frame tracks the interpolated value.
       parseCssColor(getComputedStyle(host).backgroundColor, bg);
 
       const r = refractionRef.current;
-      const bezelType = r.bezelHeightFn === lip ? 0 : 1;
-      const glassCenterStageX = hostRect.left + hostRect.width / 2 - stageRect.left;
-      const glassCenterStageY = hostRect.top + hostRect.height / 2 - stageRect.top;
-
-      // Canvas covers the host exactly, so canvasCenter == glassCenter.
       gl.uniform2f(u.resolution, layoutW, layoutH);
-      gl.uniform2f(u.stageSize, stageRect.width, stageRect.height);
-      gl.uniform2f(u.canvasCenter, glassCenterStageX, glassCenterStageY);
+      gl.uniform2f(u.stageSize, sr.width, sr.height);
+      gl.uniform2f(u.canvasCenter,
+        hr.left + hr.width / 2 - sr.left,
+        hr.top + hr.height / 2 - sr.top);
       gl.uniform2f(u.glassSize, layoutW, layoutH);
       gl.uniform2f(u.thumbPos, 0, 0);
       gl.uniform1f(u.cornerRadius, r.radius);
@@ -173,13 +120,12 @@ export function DisplacementGlass({ refraction, className, style, ...rest }: Pro
       gl.uniform1f(u.ior, r.refractiveIndex);
       gl.uniform1f(u.blurAmount, r.blur);
       gl.uniform1f(u.specularOpacity, r.specularOpacity);
-      gl.uniform1i(u.bezelType, bezelType);
+      gl.uniform1i(u.bezelType, r.bezelHeightFn === lip ? 0 : 1);
       gl.uniform4f(u.bgColor, bg.r, bg.g, bg.b, bg.a);
 
       gl.clearColor(0, 0, 0, 0);
       gl.clear(gl.COLOR_BUFFER_BIT);
-
-      if (texSourceW > 0 && texSourceH > 0) {
+      if (texW > 0 && texH > 0) {
         gl.bindTexture(gl.TEXTURE_2D, tex);
         gl.drawArrays(gl.TRIANGLES, 0, 6);
       }
@@ -191,45 +137,29 @@ export function DisplacementGlass({ refraction, className, style, ...rest }: Pro
       frameRaf = requestAnimationFrame(draw);
     };
 
-    /* ── Stage texture raster ── */
-    let rasterPending = false;
-    let rasterDirty = true;
-    let rasterRaf = 0;
+    let rasterPending = false, rasterDirty = true, rasterRaf = 0;
     let disposed = false;
+
     const kickRaster = () => {
       if (disposed || rasterPending || !rasterDirty) return;
       rasterPending = true;
       rasterDirty = false;
-      // Hide the host (incl. its canvas child) ONLY for the synchronous
-      // clone the polyfill makes at the start of update(). The polyfill's
-      // buildSvg → de() does cloneNode(true) synchronously before its
-      // first await, so by the time update() returns its promise the
-      // clone is already snapshotted. We restore visibility right after
-      // in the same JS task, so the browser never paints a hidden frame —
-      // no flash — but the captured texture omits our own pixels (which
-      // would otherwise feed back into the bezel refraction and let the
-      // user see the thumb refracting itself).
+      // Hide the host ONLY during the polyfill's synchronous cloneNode in
+      // update(). Restoring visibility in the same JS task means the
+      // browser never paints a hidden frame (no flash) but the captured
+      // texture omits our own pixels — otherwise the bezel would sample
+      // the thumb refracting itself.
       host.style.visibility = "hidden";
       const p = getHtmlRenderer().update(stage);
       host.style.visibility = "";
-      p
-        .then((srcCanvas) => {
-          if (disposed) return;
-          gl.bindTexture(gl.TEXTURE_2D, tex);
-          gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
-          gl.texImage2D(
-            gl.TEXTURE_2D,
-            0,
-            gl.RGBA,
-            gl.RGBA,
-            gl.UNSIGNED_BYTE,
-            srcCanvas,
-          );
-          texSourceW = srcCanvas.width;
-          texSourceH = srcCanvas.height;
-          requestDraw();
-        })
-        .catch(() => { if (!disposed) rasterDirty = true; })
+      p.then((src) => {
+        if (disposed) return;
+        gl.bindTexture(gl.TEXTURE_2D, tex);
+        gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, src);
+        texW = src.width; texH = src.height;
+        requestDraw();
+      }).catch(() => { if (!disposed) rasterDirty = true; })
         .finally(() => {
           if (disposed) return;
           rasterPending = false;
@@ -237,57 +167,32 @@ export function DisplacementGlass({ refraction, className, style, ...rest }: Pro
         });
     };
 
+    // Coalesce mutation bursts (slider drag, etc.) into one raster per
+    // frame instead of one per mutation.
     const markStageDirty = () => {
       rasterDirty = true;
-      /* Coalesce bursts of mutations (e.g. slider pointermove updates the
-         fill bar width many times per frame) into one raster per animation
-         frame. Without this, every mutation kicks a full HIC→texImage2D
-         round-trip, making continuous interactions feel choppy. */
       if (rasterRaf || rasterPending) return;
-      rasterRaf = requestAnimationFrame(() => {
-        rasterRaf = 0;
-        kickRaster();
-      });
+      rasterRaf = requestAnimationFrame(() => { rasterRaf = 0; kickRaster(); });
     };
 
-    /* Re-raster on real DOM/style mutations of the stage subtree. We
-       intentionally observe `subtree:true` so any descendant change
-       (slider value, switch state, theme class, etc) triggers it. */
-    const obs = new MutationObserver((mutations) => {
-      // Ignore mutations that ONLY touched our own host (its CSS bg-color
-      // or transform). Those don't change the bg behind us; only the
-      // stage's *other* descendants do.
-      let stageChanged = false;
-      for (const m of mutations) {
-        const t = m.target as Node;
-        if (host.contains(t)) continue;
-        stageChanged = true;
-        break;
-      }
-      if (stageChanged) markStageDirty();
-      // Position/color may still have moved; just redraw uniforms.
+    // Stage mutations that aren't inside the host change the bg behind
+    // us → re-raster. Same-host mutations still warrant a uniform redraw
+    // (position/color may have moved).
+    const obs = new MutationObserver((muts) => {
+      if (muts.some((m) => !host.contains(m.target))) markStageDirty();
       requestDraw();
     });
-    obs.observe(stage, {
-      subtree: true,
-      attributes: true,
-      childList: true,
-      characterData: true,
-    });
+    obs.observe(stage, { subtree: true, attributes: true, childList: true, characterData: true });
 
-    /* Re-raster on theme-class toggles on <html>. */
     const rootObs = new MutationObserver(markStageDirty);
     rootObs.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
 
-    /* Resize → redraw + re-raster. */
     const ro = new ResizeObserver(() => { markStageDirty(); requestDraw(); });
     ro.observe(stage);
     ro.observe(host);
 
-    /* CSS transitions interpolate without firing mutations. Keep redrawing
-       while any transition is active in the stage subtree. */
-    let activeTransitions = 0;
-    let tickRaf = 0;
+    // CSS transitions don't fire mutations; rAF-poll while any are active.
+    let activeTransitions = 0, tickRaf = 0;
     const tick = () => {
       requestDraw();
       tickRaf = activeTransitions > 0 ? requestAnimationFrame(tick) : 0;
@@ -296,14 +201,11 @@ export function DisplacementGlass({ refraction, className, style, ...rest }: Pro
       activeTransitions++;
       if (!tickRaf) tickRaf = requestAnimationFrame(tick);
     };
-    const onEnd = () => {
-      activeTransitions = Math.max(0, activeTransitions - 1);
-    };
+    const onEnd = () => { activeTransitions = Math.max(0, activeTransitions - 1); };
     stage.addEventListener("transitionrun", onStart);
     stage.addEventListener("transitionend", onEnd);
     stage.addEventListener("transitioncancel", onEnd);
 
-    /* Initial raster + draw. */
     markStageDirty();
     requestDraw();
 
@@ -328,33 +230,20 @@ export function DisplacementGlass({ refraction, className, style, ...rest }: Pro
     <div
       ref={hostRef}
       className={className}
-      style={{
-        ...style,
-        // Match host border-radius to the shader's rounded shape so the
-        // host's own bg-color + box-shadow follow the same outline.
-        borderRadius: refraction.radius,
-      }}
+      style={{ ...style, borderRadius: refraction.radius }}
       data-displacement-glass="true"
       {...rest}
     >
       <canvas
         ref={canvasRef}
         style={{
-          position: "absolute",
-          inset: 0,
-          width: "100%",
-          height: "100%",
-          pointerEvents: "none",
-          // Mask the canvas to the host's border-radius so the WebGL
-          // edge anti-aliasing aligns with the host's rounded corners.
-          borderRadius: "inherit",
+          position: "absolute", inset: 0, width: "100%", height: "100%",
+          pointerEvents: "none", borderRadius: "inherit",
         }}
       />
     </div>
   );
 }
-
-/* ── WebGL helpers ── */
 
 function createProgram(gl: WebGLRenderingContext, vsrc: string, fsrc: string) {
   const vs = compile(gl, gl.VERTEX_SHADER, vsrc);
@@ -382,13 +271,11 @@ function compile(gl: WebGLRenderingContext, kind: number, src: string) {
   return s;
 }
 
-/* ── CSS color parser (mirrors WebGLGlassOverlay.parseCssColor) ── */
-
 const RGBA_RE = /^rgba?\(([^)]+)\)$/;
 function parseCssColor(s: string, out: { r: number; g: number; b: number; a: number }) {
-  if (!s || s === "transparent") { out.r = 0; out.g = 0; out.b = 0; out.a = 0; return; }
+  if (!s || s === "transparent") { out.r = out.g = out.b = out.a = 0; return; }
   const m = s.match(RGBA_RE);
-  if (!m) { out.r = 1; out.g = 1; out.b = 1; out.a = 1; return; }
+  if (!m) { out.r = out.g = out.b = out.a = 1; return; }
   const p = m[1].split(",").map((x) => parseFloat(x.trim()));
   out.r = (p[0] ?? 255) / 255;
   out.g = (p[1] ?? 255) / 255;
