@@ -10,7 +10,7 @@ import {
   type ReactNode,
   type RefObject,
 } from "react";
-import { Canvas, useFrame } from "@react-three/fiber";
+import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { lip } from "@hashintel/refractive";
 import * as THREE from "three";
 import { useHTMLTexture } from "../hooks/useHTMLTexture";
@@ -58,6 +58,26 @@ interface WebGLGlassOverlayProps {
 }
 
 /**
+ * Bridge that lets DOM-side observers (ShadowProxy, useHTMLTexture)
+ * wake the R3F frame loop while it's in `demand` mode. The Canvas
+ * exposes its `invalidate` via this ref.
+ */
+type Invalidator = () => void;
+const NOOP_INVALIDATOR: Invalidator = () => {};
+const InvalidatorContext = createContext<{ current: Invalidator }>({ current: NOOP_INVALIDATOR });
+export function useGlassInvalidator() { return useContext(InvalidatorContext); }
+
+function InvalidatorBridge({ targetRef }: { targetRef: { current: Invalidator } }) {
+  const invalidate = useThree((s) => s.invalidate);
+  useEffect(() => {
+    targetRef.current = invalidate;
+    invalidate();
+    return () => { targetRef.current = NOOP_INVALIDATOR; };
+  }, [targetRef, invalidate]);
+  return null;
+}
+
+/**
  * Provides a registry of `<GlassRect>` placeholders and overlays a single
  * `<Canvas>` (sibling of the stage) that renders one `<GlassThumb>` per
  * registered placeholder. The thumbs use a shared HTMLTexture of the stage
@@ -65,6 +85,7 @@ interface WebGLGlassOverlayProps {
  */
 export function WebGLGlassOverlay({ stageRef, children }: WebGLGlassOverlayProps) {
   const overlayRef = useRef<HTMLDivElement>(null);
+  const invalidatorRef = useRef<Invalidator>(NOOP_INVALIDATOR);
   const nextIdRef = useRef(1);
   const [registrations, setRegistrations] = useState<Map<number, Registration>>(
     () => new Map(),
@@ -111,28 +132,32 @@ export function WebGLGlassOverlay({ stageRef, children }: WebGLGlassOverlayProps
 
   return (
     <RegistryContext.Provider value={api}>
-      {children}
-      <div
-        ref={overlayRef}
-        className="absolute inset-0 pointer-events-none"
-        style={{ zIndex: 1 }}
-      >
-        <div className="absolute inset-0 pointer-events-none">
-          {items.map((r) => (
-            <ShadowProxy key={r.id} el={r.el} radius={r.refraction.radius} />
-          ))}
-        </div>
-        <Canvas
-          flat
-          orthographic
-          camera={{ zoom: 1, position: [0, 0, 100], near: 0.1, far: 200 }}
-          style={{ position: "absolute", inset: 0, pointerEvents: "none" }}
-          dpr={window.devicePixelRatio}
-          gl={{ alpha: true, premultipliedAlpha: false }}
+      <InvalidatorContext.Provider value={invalidatorRef}>
+        {children}
+        <div
+          ref={overlayRef}
+          className="absolute inset-0 pointer-events-none"
+          style={{ zIndex: 1 }}
         >
-          <GlassScene stageRef={stageRef} overlayRef={overlayRef} items={items} />
-        </Canvas>
-      </div>
+          <div className="absolute inset-0 pointer-events-none">
+            {items.map((r) => (
+              <ShadowProxy key={r.id} el={r.el} radius={r.refraction.radius} />
+            ))}
+          </div>
+          <Canvas
+            flat
+            orthographic
+            camera={{ zoom: 1, position: [0, 0, 100], near: 0.1, far: 200 }}
+            style={{ position: "absolute", inset: 0, pointerEvents: "none" }}
+            dpr={window.devicePixelRatio}
+            gl={{ alpha: true, premultipliedAlpha: false }}
+            frameloop="demand"
+          >
+            <InvalidatorBridge targetRef={invalidatorRef} />
+            <GlassScene stageRef={stageRef} overlayRef={overlayRef} items={items} />
+          </Canvas>
+        </div>
+      </InvalidatorContext.Provider>
     </RegistryContext.Provider>
   );
 }
@@ -145,26 +170,65 @@ export function WebGLGlassOverlay({ stageRef, children }: WebGLGlassOverlayProps
  */
 function ShadowProxy({ el, radius }: { el: HTMLElement; radius: number }) {
   const ref = useRef<HTMLDivElement>(null);
+  const invalidator = useGlassInvalidator();
 
   useEffect(() => {
+    const div = ref.current;
+    const parent = div?.parentElement;
+    if (!div || !parent) return;
+
     let raf = 0;
+    let lastBoxShadow = "";
+
     const tick = () => {
-      const div = ref.current;
-      const parent = div?.parentElement;
-      if (div && parent) {
-        const r = el.getBoundingClientRect();
-        const pr = parent.getBoundingClientRect();
-        const cs = getComputedStyle(el);
-        div.style.transform = `translate(${r.left - pr.left}px, ${r.top - pr.top}px)`;
-        div.style.width = `${r.width}px`;
-        div.style.height = `${r.height}px`;
-        div.style.boxShadow = cs.boxShadow;
-      }
-      raf = requestAnimationFrame(tick);
+      const r = el.getBoundingClientRect();
+      const pr = parent.getBoundingClientRect();
+      div.style.transform = `translate(${r.left - pr.left}px, ${r.top - pr.top}px)`;
+      div.style.width = `${r.width}px`;
+      div.style.height = `${r.height}px`;
+      raf = 0;
     };
+
+    const schedule = () => {
+      if (!raf) raf = requestAnimationFrame(tick);
+      // Wake the GL canvas so the glass mesh follows the placeholder.
+      invalidator.current();
+    };
+
+    const syncBoxShadow = () => {
+      const bs = getComputedStyle(el).boxShadow;
+      if (bs !== lastBoxShadow) {
+        lastBoxShadow = bs;
+        div.style.boxShadow = bs;
+      }
+    };
+
     tick();
-    return () => cancelAnimationFrame(raf);
-  }, [el]);
+    syncBoxShadow();
+
+    const elObs = new ResizeObserver(schedule);
+    elObs.observe(el);
+    const parentObs = new ResizeObserver(schedule);
+    parentObs.observe(parent);
+
+    const attrObs = new MutationObserver(() => {
+      schedule();
+      syncBoxShadow();
+    });
+    attrObs.observe(el, { attributes: true, attributeFilter: ["style", "class"] });
+
+    window.addEventListener("scroll", schedule, { passive: true, capture: true });
+    window.addEventListener("resize", schedule);
+
+    return () => {
+      if (raf) cancelAnimationFrame(raf);
+      elObs.disconnect();
+      parentObs.disconnect();
+      attrObs.disconnect();
+      window.removeEventListener("scroll", schedule, true);
+      window.removeEventListener("resize", schedule);
+    };
+  }, [el, invalidator]);
 
   return (
     <div
