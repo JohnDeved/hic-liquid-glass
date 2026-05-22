@@ -51,6 +51,8 @@ export function useHTMLTexture(
 
   const pendingRef = useRef(false);
   const dirtyRef = useRef(true);
+  const visibleAnimsRef = useRef(0);
+  const placeholderAnimsRef = useRef(0);
   const currentCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const lastSizeRef = useRef({ w: 0, h: 0 });
   const invalidate = useThree((s) => s.invalidate);
@@ -73,7 +75,16 @@ export function useHTMLTexture(
     const el = elementRef.current;
     if (!el) return;
 
-    const markDirty = () => { dirtyRef.current = true; invalidate(); };
+    const markDirty = () => {
+      dirtyRef.current = true;
+      invalidate();
+      // Start the async raster immediately from the mutation microtask
+      // rather than waiting for the next useFrame. Shaves one rAF
+      // (~8-16ms) off click-to-first-rendered-frame latency. No-op if
+      // a raster is already in flight; the in-flight raster's
+      // .finally() will chain the next one.
+      kickRasterRef.current();
+    };
 
     // A placeholder-only DOM change (the invisible GlassRect placeholder
     // moving / scaling during drag) doesn't affect rasterized pixels, so
@@ -120,29 +131,28 @@ export function useHTMLTexture(
 
     window.addEventListener("resize", markDirty);
 
-    let visibleAnims = 0;
-    let placeholderAnims = 0;
-    let loopRaf = 0;
-    const loop = () => {
-      // Visible transitions force a real raster; placeholder-only
-      // transitions (press scale on the invisible GlassRect) just need
-      // geometry to follow the scale, no re-raster needed.
-      if (visibleAnims > 0) markDirty();
-      else if (placeholderAnims > 0) geomOnly();
-      const active = visibleAnims > 0 || placeholderAnims > 0;
-      loopRaf = active ? requestAnimationFrame(loop) : 0;
-    };
-    const startLoop = () => { if (!loopRaf) loopRaf = requestAnimationFrame(loop); };
+    // CSS transitions/animations interpolate computed style without
+    // firing mutations, so transition events bump these counters and
+    // useFrame drives the per-frame fan-out (and raster, for visible
+    // transitions). Doing the fan-out at the TOP of useFrame — instead
+    // of from a separate rAF loop — guarantees subscribers' refs are
+    // fresh before R3F's render path reads them. The old separate loop
+    // could fire after R3F's useFrame in a given frame, which left the
+    // mesh painting last frame's measurements (visible as a small but
+    // perceptible lag vs. the compositor-native refractive backend).
     const isPlaceholderEventTarget = (e: Event) =>
       e.target instanceof Element && e.target.closest("[data-glass-placeholder]");
     const onAnimStart = (e: Event) => {
-      if (isPlaceholderEventTarget(e)) placeholderAnims++;
-      else visibleAnims++;
-      startLoop();
+      if (isPlaceholderEventTarget(e)) placeholderAnimsRef.current++;
+      else visibleAnimsRef.current++;
+      invalidate();
     };
     const onAnimEnd = (e: Event) => {
-      if (isPlaceholderEventTarget(e)) placeholderAnims = Math.max(0, placeholderAnims - 1);
-      else visibleAnims = Math.max(0, visibleAnims - 1);
+      if (isPlaceholderEventTarget(e)) {
+        placeholderAnimsRef.current = Math.max(0, placeholderAnimsRef.current - 1);
+      } else {
+        visibleAnimsRef.current = Math.max(0, visibleAnimsRef.current - 1);
+      }
     };
 
     // Transition/animation events bubble, so a single listener at the
@@ -159,7 +169,6 @@ export function useHTMLTexture(
       rootObs.disconnect();
       resizeObs.disconnect();
       window.removeEventListener("resize", markDirty);
-      if (loopRaf) cancelAnimationFrame(loopRaf);
       el.removeEventListener("transitionrun", onAnimStart);
       el.removeEventListener("transitionend", onAnimEnd);
       el.removeEventListener("transitioncancel", onAnimEnd);
@@ -169,26 +178,43 @@ export function useHTMLTexture(
     };
   }, [elementRef, invalidate, onRasterRef]);
 
-  useFrame(() => {
-    if (!enabled || !dirtyRef.current || pendingRef.current) return;
+  // Kicks an async raster IFF one isn't already in flight. Defined
+  // outside any effect so markDirty (which fires from MutationObserver
+  // microtasks) can start the raster immediately, shaving one rAF
+  // (~8-16ms on 60-120Hz) off the input-event → first-rendered-frame
+  // latency vs. waiting for useFrame to start it.
+  //
+  // Stored in a ref so the inner function can re-arm itself from
+  // .finally() if more mutations arrived during the in-flight raster.
+  const kickRasterRef = useRef<() => void>(() => {});
+  // Assigning .current at render-time keeps the closure's `enabled` /
+  // `texture` / `invalidate` references fresh on every render without
+  // needing to re-run an effect.
+  // eslint-disable-next-line react-hooks/immutability
+  kickRasterRef.current = () => {
+    if (!enabled || pendingRef.current) return;
     const el = elementRef.current;
-    if (!el) return;
+    if (!el || !dirtyRef.current) return;
 
     pendingRef.current = true;
     dirtyRef.current = false;
     // Snapshot DOM-side state synchronously with the start of the async
-    // raster. The raster captures DOM at the moment update(el) reads the
-    // subtree; subscribers (CanvasRectUpdater, RegisteredGlass) capture
-    // their per-rect measurements at the same instant. When the raster
-    // completes we commit those snapshots together with the new texture,
-    // so the mesh, canvas wrap, and refracted content all advance as one
-    // atomic step. This eliminates the 1-frame skew that otherwise made
-    // the refracted background slide vs. the mesh during drag and "snap
-    // back" when motion paused.
+    // raster. The raster captures DOM at the moment update(el) reads
+    // the subtree; subscribers (CanvasRectUpdater, RegisteredGlass)
+    // capture their per-rect measurements at the same instant. When
+    // the raster completes we commit those snapshots together with the
+    // new texture so mesh, canvas wrap, and refracted content all
+    // advance as one atomic step.
     onRasterRef?.current?.start();
+    const __t0 = performance.now();
     getHtmlRenderer()
       .update(el)
       .then((canvas) => {
+        const __dt = performance.now() - __t0;
+        const w = window as unknown as { __rasterTimes?: number[] };
+        if (!w.__rasterTimes) w.__rasterTimes = [];
+        w.__rasterTimes.push(__dt);
+        if (w.__rasterTimes.length > 500) w.__rasterTimes.shift();
         const sizeChanged =
           canvas.width !== lastSizeRef.current.w ||
           canvas.height !== lastSizeRef.current.h;
@@ -203,13 +229,49 @@ export function useHTMLTexture(
         invalidate();
       })
       .catch(() => {
-        // On failure, keep the previous canvas but try again next frame.
+        // On failure, keep the previous canvas but try again.
         dirtyRef.current = true;
         invalidate();
       })
       .finally(() => {
         pendingRef.current = false;
+        // Mutations that arrived during the in-flight raster set
+        // dirtyRef; chain the next raster immediately so a Framer
+        // Motion burst (e.g. switch toggle: 29 bg-color mutations in
+        // ~256ms) sustains back-to-back rasters without waiting for
+        // the next useFrame.
+        if (dirtyRef.current) kickRasterRef.current();
       });
+  };
+
+  useFrame(() => {
+    if (!enabled) return;
+
+    // CSS transition driver. Visible transitions (e.g. switch bg-color
+    // easing) need a fresh raster every frame; placeholder-only
+    // transitions (the invisible GlassRect's press-scale / left / etc.)
+    // only need geometry to follow. We do BOTH at the TOP of useFrame
+    // so subscribers' refs (positionRef, targetRef, scaleRef, bgColorRef)
+    // are updated BEFORE any other useFrame consumer reads them this
+    // frame. This is the key to feeling as smooth as the compositor-
+    // native refractive backend: the mesh and wrap transform always
+    // reflect the current interpolated CSS state, not the previous frame's.
+    const transitionActive =
+      visibleAnimsRef.current > 0 || placeholderAnimsRef.current > 0;
+    if (transitionActive) {
+      onRasterRef?.current?.start();
+      onRasterRef?.current?.commit();
+      if (visibleAnimsRef.current > 0) dirtyRef.current = true;
+      invalidate();
+    }
+
+    // markDirty kicks the raster immediately when a subtree mutation
+    // fires, but ResizeObserver / window-resize / theme-class events
+    // and the transition path above set dirty without going through
+    // markDirty's kick path. Catch them here.
+    if (dirtyRef.current && !pendingRef.current) {
+      kickRasterRef.current();
+    }
   });
 
   return texture;
