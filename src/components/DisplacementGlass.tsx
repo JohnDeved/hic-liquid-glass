@@ -194,6 +194,7 @@ export function DisplacementGlass({ refraction, className, style, ...rest }: Pro
     /* ── Stage texture raster ── */
     let rasterPending = false;
     let rasterDirty = true;
+    let rasterRaf = 0;
     let disposed = false;
     const kickRaster = () => {
       if (disposed || rasterPending || !rasterDirty) return;
@@ -232,11 +233,22 @@ export function DisplacementGlass({ refraction, className, style, ...rest }: Pro
         .finally(() => {
           if (disposed) return;
           rasterPending = false;
-          if (rasterDirty) kickRaster();
+          if (rasterDirty) markStageDirty();
         });
     };
 
-    const markStageDirty = () => { rasterDirty = true; kickRaster(); };
+    const markStageDirty = () => {
+      rasterDirty = true;
+      /* Coalesce bursts of mutations (e.g. slider pointermove updates the
+         fill bar width many times per frame) into one raster per animation
+         frame. Without this, every mutation kicks a full HIC→texImage2D
+         round-trip, making continuous interactions feel choppy. */
+      if (rasterRaf || rasterPending) return;
+      rasterRaf = requestAnimationFrame(() => {
+        rasterRaf = 0;
+        kickRaster();
+      });
+    };
 
     /* Re-raster on real DOM/style mutations of the stage subtree. We
        intentionally observe `subtree:true` so any descendant change
@@ -299,6 +311,7 @@ export function DisplacementGlass({ refraction, className, style, ...rest }: Pro
       disposed = true;
       cancelAnimationFrame(frameRaf);
       if (tickRaf) cancelAnimationFrame(tickRaf);
+      if (rasterRaf) cancelAnimationFrame(rasterRaf);
       obs.disconnect();
       rootObs.disconnect();
       ro.disconnect();
