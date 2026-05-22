@@ -363,8 +363,19 @@ function CanvasRectUpdater({
     const w = Math.ceil(maxX - minX + CANVAS_PADDING * 2);
     const h = Math.ceil(maxY - minY + CANVAS_PADDING * 2);
 
-    canvasRectRef.current.x = x;
-    canvasRectRef.current.y = y;
+    // Snap the wrap to integer pixels so the GPU compositor doesn't
+    // sub-pixel-filter the canvas backbuffer. The fractional remainder
+    // is absorbed by the mesh position in RegisteredGlass (which reads
+    // canvasRectRef and subtracts from glassCenter), so the final
+    // on-screen glass position remains exact. We MUST store the same
+    // int values in the ref that we apply to the wrap transform —
+    // otherwise the shader's canvasCenter and the wrap's actual
+    // position disagree and the mesh visibly shifts.
+    const intX = Math.round(x);
+    const intY = Math.round(y);
+
+    canvasRectRef.current.x = intX;
+    canvasRectRef.current.y = intY;
     canvasRectRef.current.w = w;
     canvasRectRef.current.h = h;
 
@@ -375,10 +386,10 @@ function CanvasRectUpdater({
       last.w = w;
       last.h = h;
     }
-    if (x !== last.x || y !== last.y) {
-      wrap.style.transform = `translate(${x}px, ${y}px)`;
-      last.x = x;
-      last.y = y;
+    if (intX !== last.x || intY !== last.y) {
+      wrap.style.transform = `translate(${intX}px, ${intY}px)`;
+      last.x = intX;
+      last.y = intY;
     }
   });
 
