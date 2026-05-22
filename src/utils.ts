@@ -12,7 +12,7 @@ const HEX_RE = /^#([0-9a-f]{6})$/i;
 const RGB_RE = /^rgba?\(([^)]+)\)$/;
 const DEFAULT_BG: readonly [number, number, number] = [26, 26, 26];
 
-export function parseColorToRGB(str: string): [number, number, number] {
+function parseColorToRGB(str: string): [number, number, number] {
   const s = str.trim();
   const hex = HEX_RE.exec(s);
   if (hex) {
