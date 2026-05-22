@@ -45,14 +45,9 @@ export default function App() {
             {" "}<span className="inline-block text-[0.7rem] bg-emerald-500/15 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 px-2.5 py-0.5 rounded-[5px] tracking-[0.02em] normal-case">Cross-browser</span>
           </div>
           <p className="text-[0.82rem] opacity-55 mt-2 leading-relaxed">
-            The thumb is a regular CSS-styled <code className="text-[0.78rem] px-1 py-0.5 rounded bg-[var(--ui-border)]">div</code>{" "}
-            so its position, color, and shadow animate compositor-native. A
-            child <code className="text-[0.78rem] px-1 py-0.5 rounded bg-[var(--ui-border)]">canvas</code> runs a
-            GLSL shader that paints only the bezel refraction, sampling a
-            texture of the surrounding HTML (captured via the new
-            HTML-in-Canvas API, or a foreignObject SVG fallback elsewhere).
-            The texture is re-rastered only when the surrounding DOM
-            actually changes. Works in any browser.
+            A GLSL shader warps a snapshot of the HTML behind the element,
+            taken with the new HTML-in-Canvas API (or a foreignObject SVG
+            fallback). Works in every browser.
           </p>
         </div>
         <div className="mb-6">
