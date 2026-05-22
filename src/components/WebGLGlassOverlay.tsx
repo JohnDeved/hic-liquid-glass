@@ -191,7 +191,6 @@ function ShadowProxy({ el, radius }: { el: HTMLElement; radius: number }) {
 
     const schedule = () => {
       if (!raf) raf = requestAnimationFrame(tick);
-      // Wake the GL canvas so the glass mesh follows the placeholder.
       invalidator.current();
     };
 
@@ -202,6 +201,22 @@ function ShadowProxy({ el, radius }: { el: HTMLElement; radius: number }) {
         div.style.boxShadow = bs;
       }
     };
+
+    // CSS transitions/animations interpolate computed style purely in
+    // the browser; no JS state changes, so we'd miss them in demand
+    // mode. Run a continuous loop while at least one transition or
+    // animation is in flight so the glass mesh tracks the placeholder
+    // smoothly.
+    let activeAnims = 0;
+    let loopRaf = 0;
+    const loop = () => {
+      schedule();
+      syncBoxShadow();
+      loopRaf = activeAnims > 0 ? requestAnimationFrame(loop) : 0;
+    };
+    const startLoop = () => { if (!loopRaf) loopRaf = requestAnimationFrame(loop); };
+    const onAnimStart = () => { activeAnims++; startLoop(); };
+    const onAnimEnd = () => { activeAnims = Math.max(0, activeAnims - 1); };
 
     tick();
     syncBoxShadow();
@@ -217,14 +232,28 @@ function ShadowProxy({ el, radius }: { el: HTMLElement; radius: number }) {
     });
     attrObs.observe(el, { attributes: true, attributeFilter: ["style", "class"] });
 
+    el.addEventListener("transitionrun", onAnimStart);
+    el.addEventListener("transitionend", onAnimEnd);
+    el.addEventListener("transitioncancel", onAnimEnd);
+    el.addEventListener("animationstart", onAnimStart);
+    el.addEventListener("animationend", onAnimEnd);
+    el.addEventListener("animationcancel", onAnimEnd);
+
     window.addEventListener("scroll", schedule, { passive: true, capture: true });
     window.addEventListener("resize", schedule);
 
     return () => {
       if (raf) cancelAnimationFrame(raf);
+      if (loopRaf) cancelAnimationFrame(loopRaf);
       elObs.disconnect();
       parentObs.disconnect();
       attrObs.disconnect();
+      el.removeEventListener("transitionrun", onAnimStart);
+      el.removeEventListener("transitionend", onAnimEnd);
+      el.removeEventListener("transitioncancel", onAnimEnd);
+      el.removeEventListener("animationstart", onAnimStart);
+      el.removeEventListener("animationend", onAnimEnd);
+      el.removeEventListener("animationcancel", onAnimEnd);
       window.removeEventListener("scroll", schedule, true);
       window.removeEventListener("resize", schedule);
     };

@@ -56,6 +56,10 @@ export function useHTMLTexture(
   // resize, and on theme class toggles (CSS-variable cascade is not
   // observable via MutationObserver inside the subtree). Also wakes
   // the R3F frame loop (Canvas runs in `demand` mode for idle perf).
+  //
+  // CSS transitions/animations interpolate computed style without firing
+  // mutations, so we additionally run a continuous dirty+invalidate loop
+  // while any transition/animation is in flight inside the subtree.
   useEffect(() => {
     const el = elementRef.current;
     if (!el) return;
@@ -81,11 +85,37 @@ export function useHTMLTexture(
 
     window.addEventListener("resize", markDirty);
 
+    let activeAnims = 0;
+    let loopRaf = 0;
+    const loop = () => {
+      markDirty();
+      loopRaf = activeAnims > 0 ? requestAnimationFrame(loop) : 0;
+    };
+    const startLoop = () => { if (!loopRaf) loopRaf = requestAnimationFrame(loop); };
+    const onAnimStart = () => { activeAnims++; startLoop(); };
+    const onAnimEnd = () => { activeAnims = Math.max(0, activeAnims - 1); };
+
+    // Transition/animation events bubble, so a single listener at the
+    // root of the captured subtree catches every descendant animation.
+    el.addEventListener("transitionrun", onAnimStart);
+    el.addEventListener("transitionend", onAnimEnd);
+    el.addEventListener("transitioncancel", onAnimEnd);
+    el.addEventListener("animationstart", onAnimStart);
+    el.addEventListener("animationend", onAnimEnd);
+    el.addEventListener("animationcancel", onAnimEnd);
+
     return () => {
       subtreeObs.disconnect();
       rootObs.disconnect();
       resizeObs.disconnect();
       window.removeEventListener("resize", markDirty);
+      if (loopRaf) cancelAnimationFrame(loopRaf);
+      el.removeEventListener("transitionrun", onAnimStart);
+      el.removeEventListener("transitionend", onAnimEnd);
+      el.removeEventListener("transitioncancel", onAnimEnd);
+      el.removeEventListener("animationstart", onAnimStart);
+      el.removeEventListener("animationend", onAnimEnd);
+      el.removeEventListener("animationcancel", onAnimEnd);
     };
   }, [elementRef, invalidate]);
 
