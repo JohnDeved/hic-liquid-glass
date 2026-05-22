@@ -10,7 +10,7 @@ import {
   type ReactNode,
   type RefObject,
 } from "react";
-import { Canvas, useThree } from "@react-three/fiber";
+import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { lip } from "@hashintel/refractive";
 import * as THREE from "three";
 import { useHTMLTexture, type RasterSubscription } from "../hooks/useHTMLTexture";
@@ -347,6 +347,17 @@ function CanvasRectUpdater({
 }: CanvasRectUpdaterProps) {
   const lastRef = useRef({ x: NaN, y: NaN, w: -1, h: -1 });
   const pendingRef = useRef({ x: 0, y: 0, w: 1, h: 1, valid: false });
+  // Latest committed target written by sub.commit() — applied to DOM
+  // inside useFrame, not inside commit(). Reason: commit() can run from
+  // a MutationObserver microtask (the geomOnly placeholder-mutation
+  // path), which is *before* the next R3F render. If we wrote
+  // `wrap.style.transform` there, the browser would composite a frame
+  // where the DOM wrap is at the new position but the WebGL canvas
+  // still holds the previous frame's mesh pixels — visible as drag
+  // jitter against the refracted texture. Deferring the DOM write to
+  // useFrame guarantees wrap-transform and mesh-position land in the
+  // same compositor cycle.
+  const targetRef = useRef({ x: 0, y: 0, w: 1, h: 1, valid: false });
   const itemsRef = useRef(items);
   useEffect(() => { itemsRef.current = items; }, [items]);
 
@@ -395,8 +406,7 @@ function CanvasRectUpdater({
       },
       commit: () => {
         const p = pendingRef.current;
-        const wrap = canvasWrapRef.current;
-        if (!p.valid || !wrap) return;
+        if (!p.valid) return;
 
         // Snap to integer pixels: the GPU compositor would otherwise
         // sub-pixel-filter the canvas backbuffer between frames. The
@@ -406,36 +416,68 @@ function CanvasRectUpdater({
         const intX = Math.round(p.x);
         const intY = Math.round(p.y);
 
+        // canvasRectRef is read by RegisteredGlass.commit() (which runs
+        // in the same fan-out) to compute mesh-position relative to the
+        // wrap center. Updating it here keeps mesh-pos and wrap-target
+        // referencing the same instant, even though the wrap-to-DOM
+        // write is deferred until useFrame.
         canvasRectRef.current.x = intX;
         canvasRectRef.current.y = intY;
         canvasRectRef.current.w = p.w;
         canvasRectRef.current.h = p.h;
 
-        const last = lastRef.current;
-        if (p.w !== last.w || p.h !== last.h) {
-          wrap.style.width = `${p.w}px`;
-          wrap.style.height = `${p.h}px`;
-          last.w = p.w;
-          last.h = p.h;
-        }
-        if (intX !== last.x || intY !== last.y) {
-          wrap.style.transform = `translate(${intX}px, ${intY}px)`;
-          last.x = intX;
-          last.y = intY;
-        }
+        const t = targetRef.current;
+        t.x = intX;
+        t.y = intY;
+        t.w = p.w;
+        t.h = p.h;
+        t.valid = true;
       },
     };
 
-    // Initial snapshot + commit so the wrap has a valid position before
-    // the first raster completes. Without this the canvas sits at its
-    // default 1×1 / (0,0) for one frame after mount.
+    // Initial snapshot + commit so refs have a valid target before the
+    // first useFrame applies it to DOM.
     sub.snapshot();
     sub.commit();
 
     rasterSubsRef.current.add(sub);
     const subs = rasterSubsRef.current;
+
+    // Initial DOM apply so the wrap isn't sitting at 1×1 / (0,0) for
+    // one frame after mount, before useFrame runs.
+    const wrap0 = canvasWrapRef.current;
+    const t0 = targetRef.current;
+    if (wrap0 && t0.valid) {
+      wrap0.style.width = `${t0.w}px`;
+      wrap0.style.height = `${t0.h}px`;
+      wrap0.style.transform = `translate(${t0.x}px, ${t0.y}px)`;
+      lastRef.current = { x: t0.x, y: t0.y, w: t0.w, h: t0.h };
+    }
+
     return () => { subs.delete(sub); };
   }, [overlayRef, canvasWrapRef, canvasRectRef, rasterSubsRef]);
+
+  // Flush latest committed target to DOM right before R3F renders.
+  // This keeps the wrap CSS transform on the same compositor cycle as
+  // the WebGL mesh render, eliminating the 1-frame DOM-vs-canvas skew
+  // that previously surfaced as drag jitter.
+  useFrame(() => {
+    const wrap = canvasWrapRef.current;
+    const t = targetRef.current;
+    if (!wrap || !t.valid) return;
+    const last = lastRef.current;
+    if (t.w !== last.w || t.h !== last.h) {
+      wrap.style.width = `${t.w}px`;
+      wrap.style.height = `${t.h}px`;
+      last.w = t.w;
+      last.h = t.h;
+    }
+    if (t.x !== last.x || t.y !== last.y) {
+      wrap.style.transform = `translate(${t.x}px, ${t.y}px)`;
+      last.x = t.x;
+      last.y = t.y;
+    }
+  });
 
   return null;
 }
