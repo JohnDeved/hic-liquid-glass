@@ -85,6 +85,8 @@ function InvalidatorBridge({ targetRef }: { targetRef: { current: Invalidator } 
  */
 export function WebGLGlassOverlay({ stageRef, children }: WebGLGlassOverlayProps) {
   const overlayRef = useRef<HTMLDivElement>(null);
+  const canvasWrapRef = useRef<HTMLDivElement>(null);
+  const canvasRectRef = useRef({ x: 0, y: 0, w: 1, h: 1 });
   const invalidatorRef = useRef<Invalidator>(NOOP_INVALIDATOR);
   const nextIdRef = useRef(1);
   const [registrations, setRegistrations] = useState<Map<number, Registration>>(
@@ -144,18 +146,42 @@ export function WebGLGlassOverlay({ stageRef, children }: WebGLGlassOverlayProps
               <ShadowProxy key={r.id} el={r.el} radius={r.refraction.radius} />
             ))}
           </div>
-          <Canvas
-            flat
-            orthographic
-            camera={{ zoom: 1, position: [0, 0, 100], near: 0.1, far: 200 }}
-            style={{ position: "absolute", inset: 0, pointerEvents: "none" }}
-            dpr={window.devicePixelRatio}
-            gl={{ alpha: true, premultipliedAlpha: false }}
-            frameloop="demand"
+          <CanvasRectTracker
+            items={items}
+            overlayRef={overlayRef}
+            canvasWrapRef={canvasWrapRef}
+            canvasRectRef={canvasRectRef}
+          />
+          <div
+            ref={canvasWrapRef}
+            style={{
+              position: "absolute",
+              top: 0,
+              left: 0,
+              width: 1,
+              height: 1,
+              transform: "translate(0px, 0px)",
+              pointerEvents: "none",
+              willChange: "transform, width, height",
+            }}
           >
-            <InvalidatorBridge targetRef={invalidatorRef} />
-            <GlassScene stageRef={stageRef} overlayRef={overlayRef} items={items} />
-          </Canvas>
+            <Canvas
+              flat
+              orthographic
+              camera={{ zoom: 1, position: [0, 0, 100], near: 0.1, far: 200 }}
+              style={{ position: "absolute", inset: 0, pointerEvents: "none" }}
+              dpr={window.devicePixelRatio}
+              gl={{ alpha: true, premultipliedAlpha: false }}
+              frameloop="demand"
+            >
+              <InvalidatorBridge targetRef={invalidatorRef} />
+              <GlassScene
+                stageRef={stageRef}
+                canvasRectRef={canvasRectRef}
+                items={items}
+              />
+            </Canvas>
+          </div>
         </div>
       </InvalidatorContext.Provider>
     </RegistryContext.Provider>
@@ -275,13 +301,162 @@ function ShadowProxy({ el, radius }: { el: HTMLElement; radius: number }) {
   );
 }
 
+interface CanvasRectTrackerProps {
+  items: Registration[];
+  overlayRef: RefObject<HTMLDivElement | null>;
+  canvasWrapRef: RefObject<HTMLDivElement | null>;
+  canvasRectRef: RefObject<{ x: number; y: number; w: number; h: number }>;
+}
+
+/** Padding (CSS px) around the placeholder union rect, to absorb sub-pixel
+ *  jitter and leave room for the bezel's outermost AA band. */
+const CANVAS_PADDING = 16;
+
+/**
+ * Computes the tight bounding rect that the WebGL canvas needs to cover —
+ * the union of all placeholder bounding rects plus a small padding — and
+ * applies it to `canvasWrapRef` as inline width/height + transform. The
+ * size is layout-based (offsetWidth/Height) so it stays stable during
+ * drags; only the transform changes per frame as the placeholder moves.
+ *
+ * Runs the same event-driven update pattern as ShadowProxy (mutation,
+ * resize, scroll, transition/animation events + a continuous loop while
+ * any transition is in flight) and pokes `invalidator` so the R3F frame
+ * loop wakes up to re-read the new rect.
+ */
+function CanvasRectTracker({
+  items,
+  overlayRef,
+  canvasWrapRef,
+  canvasRectRef,
+}: CanvasRectTrackerProps) {
+  const invalidator = useGlassInvalidator();
+
+  useEffect(() => {
+    const overlay = overlayRef.current;
+    const wrap = canvasWrapRef.current;
+    if (!overlay || !wrap || items.length === 0) return;
+
+    let lastW = -1;
+    let lastH = -1;
+    let lastX = Number.NaN;
+    let lastY = Number.NaN;
+
+    const measure = () => {
+      const ovRect = overlay.getBoundingClientRect();
+      let minX = Infinity;
+      let minY = Infinity;
+      let maxX = -Infinity;
+      let maxY = -Infinity;
+      let maxLayoutW = 0;
+      let maxLayoutH = 0;
+      for (const r of items) {
+        const el = r.el;
+        const er = el.getBoundingClientRect();
+        const cx = er.left + er.width / 2;
+        const cy = er.top + er.height / 2;
+        // Use layout size (not transformed bounding rect) so the canvas
+        // doesn't bounce as the thumb scales — center around the bounding
+        // box but size from the untransformed layout extent.
+        const lw = el.offsetWidth || er.width;
+        const lh = el.offsetHeight || er.height;
+        maxLayoutW = Math.max(maxLayoutW, lw);
+        maxLayoutH = Math.max(maxLayoutH, lh);
+        minX = Math.min(minX, cx - lw / 2);
+        minY = Math.min(minY, cy - lh / 2);
+        maxX = Math.max(maxX, cx + lw / 2);
+        maxY = Math.max(maxY, cy + lh / 2);
+      }
+      if (!isFinite(minX)) return;
+      const x = minX - CANVAS_PADDING - ovRect.left;
+      const y = minY - CANVAS_PADDING - ovRect.top;
+      const w = Math.ceil(maxX - minX + CANVAS_PADDING * 2);
+      const h = Math.ceil(maxY - minY + CANVAS_PADDING * 2);
+      canvasRectRef.current.x = x;
+      canvasRectRef.current.y = y;
+      canvasRectRef.current.w = w;
+      canvasRectRef.current.h = h;
+      if (w !== lastW || h !== lastH) {
+        wrap.style.width = `${w}px`;
+        wrap.style.height = `${h}px`;
+        lastW = w;
+        lastH = h;
+      }
+      if (x !== lastX || y !== lastY) {
+        wrap.style.transform = `translate(${x}px, ${y}px)`;
+        lastX = x;
+        lastY = y;
+      }
+      invalidator.current();
+    };
+
+    let raf = 0;
+    const schedule = () => {
+      if (!raf) raf = requestAnimationFrame(() => { raf = 0; measure(); });
+    };
+
+    measure();
+
+    const elObs = new ResizeObserver(schedule);
+    const attrObs = new MutationObserver(schedule);
+    for (const r of items) {
+      elObs.observe(r.el);
+      attrObs.observe(r.el, { attributes: true, attributeFilter: ["style", "class"] });
+    }
+    const ovObs = new ResizeObserver(schedule);
+    ovObs.observe(overlay);
+
+    let activeAnims = 0;
+    let loopRaf = 0;
+    const loop = () => {
+      measure();
+      loopRaf = activeAnims > 0 ? requestAnimationFrame(loop) : 0;
+    };
+    const startLoop = () => { if (!loopRaf) loopRaf = requestAnimationFrame(loop); };
+    const onAnimStart = () => { activeAnims++; startLoop(); };
+    const onAnimEnd = () => { activeAnims = Math.max(0, activeAnims - 1); };
+
+    for (const r of items) {
+      r.el.addEventListener("transitionrun", onAnimStart);
+      r.el.addEventListener("transitionend", onAnimEnd);
+      r.el.addEventListener("transitioncancel", onAnimEnd);
+      r.el.addEventListener("animationstart", onAnimStart);
+      r.el.addEventListener("animationend", onAnimEnd);
+      r.el.addEventListener("animationcancel", onAnimEnd);
+    }
+
+    window.addEventListener("scroll", schedule, { passive: true, capture: true });
+    window.addEventListener("resize", schedule);
+
+    return () => {
+      if (raf) cancelAnimationFrame(raf);
+      if (loopRaf) cancelAnimationFrame(loopRaf);
+      elObs.disconnect();
+      attrObs.disconnect();
+      ovObs.disconnect();
+      for (const r of items) {
+        r.el.removeEventListener("transitionrun", onAnimStart);
+        r.el.removeEventListener("transitionend", onAnimEnd);
+        r.el.removeEventListener("transitioncancel", onAnimEnd);
+        r.el.removeEventListener("animationstart", onAnimStart);
+        r.el.removeEventListener("animationend", onAnimEnd);
+        r.el.removeEventListener("animationcancel", onAnimEnd);
+      }
+      window.removeEventListener("scroll", schedule, true);
+      window.removeEventListener("resize", schedule);
+    };
+  }, [items, overlayRef, canvasWrapRef, canvasRectRef, invalidator]);
+
+  return null;
+}
+
 interface GlassSceneProps {
   stageRef: RefObject<HTMLElement | null>;
-  overlayRef: RefObject<HTMLDivElement | null>;
+  canvasRectRef: RefObject<{ x: number; y: number; w: number; h: number }>;
   items: Registration[];
 }
 
-function GlassScene({ stageRef, overlayRef, items }: GlassSceneProps) {
+function GlassScene({ stageRef, canvasRectRef, items }: GlassSceneProps) {
   const sceneTex = useHTMLTexture(stageRef);
   return (
     <>
@@ -289,7 +464,8 @@ function GlassScene({ stageRef, overlayRef, items }: GlassSceneProps) {
         <RegisteredGlass
           key={r.id}
           reg={r}
-          overlayRef={overlayRef}
+          stageRef={stageRef}
+          canvasRectRef={canvasRectRef}
           sceneTex={sceneTex}
         />
       ))}
@@ -299,7 +475,8 @@ function GlassScene({ stageRef, overlayRef, items }: GlassSceneProps) {
 
 interface RegisteredGlassProps {
   reg: Registration;
-  overlayRef: RefObject<HTMLDivElement | null>;
+  stageRef: RefObject<HTMLElement | null>;
+  canvasRectRef: RefObject<{ x: number; y: number; w: number; h: number }>;
   sceneTex: THREE.Texture;
 }
 
@@ -309,30 +486,46 @@ interface RegisteredGlassProps {
  * pre-transform layout size (offsetWidth/Height) gives us the glass size;
  * the post-transform bounding rect gives us position + scale.
  */
-function RegisteredGlass({ reg, overlayRef, sceneTex }: RegisteredGlassProps) {
+function RegisteredGlass({ reg, stageRef, canvasRectRef, sceneTex }: RegisteredGlassProps) {
   const [size, setSize] = useState({ w: 1, h: 1 });
   const positionRef = useRef<[number, number, number]>([0, 0, 0]);
   const scaleRef = useRef<{ v: number }>({ v: 1 });
   const bgColorRef = useRef({ r: 1, g: 1, b: 1, a: 1 });
+  const stageSizeRef = useRef({ x: 1, y: 1 });
+  const canvasCenterRef = useRef({ x: 0, y: 0 });
 
   useFrame(() => {
     const el = reg.el;
-    const overlay = overlayRef.current;
-    if (!el || !overlay) return;
+    const stage = stageRef.current;
+    const canvasRect = canvasRectRef.current;
+    if (!el || !stage || !canvasRect) return;
 
     const layoutW = el.offsetWidth;
     const layoutH = el.offsetHeight;
     if (layoutW <= 0 || layoutH <= 0) return;
 
     const elRect = el.getBoundingClientRect();
-    const ovRect = overlay.getBoundingClientRect();
+    const stageRect = stage.getBoundingClientRect();
 
-    const centerX = elRect.left + elRect.width / 2 - ovRect.left;
-    const centerY = elRect.top + elRect.height / 2 - ovRect.top;
+    // Glass center in stage CSS px (TL origin, y-down).
+    const glassCenterStageX = elRect.left + elRect.width / 2 - stageRect.left;
+    const glassCenterStageY = elRect.top + elRect.height / 2 - stageRect.top;
 
+    // Canvas center in stage CSS px = canvas TL within stage + canvas/2.
+    // canvasRectRef.x/y are canvas TL within overlay; overlay is laid out
+    // 1:1 with stage so we can use them directly as stage offsets.
+    const canvasCenterStageX = canvasRect.x + canvasRect.w / 2;
+    const canvasCenterStageY = canvasRect.y + canvasRect.h / 2;
+    canvasCenterRef.current.x = canvasCenterStageX;
+    canvasCenterRef.current.y = canvasCenterStageY;
+
+    stageSizeRef.current.x = stageRect.width;
+    stageSizeRef.current.y = stageRect.height;
+
+    // Mesh position relative to canvas center, in world coords (y-up).
     const pos = positionRef.current;
-    pos[0] = centerX - ovRect.width / 2;
-    pos[1] = ovRect.height / 2 - centerY;
+    pos[0] = glassCenterStageX - canvasCenterStageX;
+    pos[1] = canvasCenterStageY - glassCenterStageY;
 
     scaleRef.current.v = elRect.width / layoutW;
 
@@ -355,6 +548,10 @@ function RegisteredGlass({ reg, overlayRef, sceneTex }: RegisteredGlassProps) {
   const scaleCarrier = scaleRef.current;
   // eslint-disable-next-line react-hooks/refs
   const bgCarrier = bgColorRef.current;
+  // eslint-disable-next-line react-hooks/refs
+  const stageSizeCarrier = stageSizeRef.current;
+  // eslint-disable-next-line react-hooks/refs
+  const canvasCenterCarrier = canvasCenterRef.current;
 
   return (
     <GlassThumb
@@ -371,6 +568,8 @@ function RegisteredGlass({ reg, overlayRef, sceneTex }: RegisteredGlassProps) {
       scaleRef={scaleCarrier}
       bgColorRef={bgCarrier}
       sceneTex={sceneTex}
+      stageSizeRef={stageSizeCarrier}
+      canvasCenterRef={canvasCenterCarrier}
     />
   );
 }

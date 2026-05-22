@@ -38,6 +38,19 @@ interface GlassThumbProps {
    * UVs aligned with the parent canvas viewport.
    */
   sceneTex?: THREE.Texture | null;
+  /**
+   * Size of the sceneTex source in CSS pixels (full stage rect). Required
+   * when the canvas viewport is smaller than the texture source — the
+   * shader samples in stage coords so it can render only the glass region
+   * while still refracting the full stage background.
+   */
+  stageSizeRef?: { x: number; y: number };
+  /**
+   * Canvas center in stage CSS pixels (top-left origin, y-down). Tells
+   * the shader where in the source texture the canvas viewport sits.
+   * Defaults to (resolution/2) when omitted, i.e. canvas equals stage.
+   */
+  canvasCenterRef?: { x: number; y: number };
 }
 
 export function GlassThumb({
@@ -55,6 +68,8 @@ export function GlassThumb({
   scaleRef,
   bgColorRef,
   sceneTex = null,
+  stageSizeRef,
+  canvasCenterRef,
 }: GlassThumbProps) {
   const meshRef = useRef<THREE.Mesh>(null);
   const { size, gl } = useThree();
@@ -70,6 +85,8 @@ export function GlassThumb({
     () => ({
       sceneTex: { value: null as THREE.Texture | null },
       resolution: { value: new THREE.Vector2(size.width, size.height) },
+      stageSize: { value: new THREE.Vector2(size.width, size.height) },
+      canvasCenter: { value: new THREE.Vector2(size.width / 2, size.height / 2) },
       glassSize: { value: new THREE.Vector2(width, height) },
       thumbPos: { value: new THREE.Vector2(position[0], position[1]) },
       cornerRadius: { value: radius },
@@ -107,6 +124,16 @@ export function GlassThumb({
     u.thumbPos.value.set(position[0], position[1]);
     u.resolution.value.set(size.width, size.height);
     u.glassSize.value.set(width, height);
+    if (stageSizeRef) {
+      u.stageSize.value.set(stageSizeRef.x, stageSizeRef.y);
+    } else {
+      u.stageSize.value.set(size.width, size.height);
+    }
+    if (canvasCenterRef) {
+      u.canvasCenter.value.set(canvasCenterRef.x, canvasCenterRef.y);
+    } else {
+      u.canvasCenter.value.set(size.width / 2, size.height / 2);
+    }
     u.cornerRadius.value = radius;
     u.bezelWidth.value = bezelWidth;
     u.glassThickness.value = glassThickness;

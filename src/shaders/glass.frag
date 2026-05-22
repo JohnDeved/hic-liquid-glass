@@ -1,7 +1,9 @@
 precision highp float;
 
 uniform sampler2D sceneTex;
-uniform vec2 resolution;       // viewport / FBO size in pixels
+uniform vec2 resolution;       // viewport / FBO size in pixels (canvas backbuffer size, CSS px)
+uniform vec2 stageSize;        // sceneTex source size in CSS pixels (full stage)
+uniform vec2 canvasCenter;     // canvas center within the stage, CSS pixels (TL origin, y-down)
 uniform vec2 glassSize;        // glass plane size in pixels
 uniform vec2 thumbPos;         // glass center in world coords (updated per-frame)
 uniform float cornerRadius;    // corner radius in pixels
@@ -111,8 +113,12 @@ void main() {
   // Distance to border (positive inside)
   float distToBorder = max(0.0, -dist);
 
-  // FBO UV for this fragment (no displacement)
-  vec2 sceneUV = (thumbPos + localPx + resolution * 0.5) / resolution;
+  // sceneTex sampling is in stage coords (canvas may be smaller than stage now)
+  vec2 mp = thumbPos + localPx;
+  vec2 sceneUV = vec2(
+    (canvasCenter.x + mp.x) / stageSize.x,
+    (stageSize.y - canvasCenter.y + mp.y) / stageSize.y
+  );
 
   // Compute displacement in the bezel zone
   vec2 displacement = vec2(0.0);
@@ -160,7 +166,7 @@ void main() {
   }
 
   // Sample scene texture with displacement
-  vec2 displacedUV = sceneUV + displacement / resolution;
+  vec2 displacedUV = sceneUV + displacement / stageSize;
   displacedUV = clamp(displacedUV, vec2(0.001), vec2(0.999));
 
   // Gaussian blur (only when blurAmount > threshold)
@@ -174,7 +180,7 @@ void main() {
       for (int x = -12; x <= 12; x++) {
         if (abs(x) > rad || abs(y) > rad) continue;
         float w = exp(-float(x * x + y * y) / (2.0 * sigma * sigma));
-        vec2 off = vec2(float(x), float(y)) / resolution;
+        vec2 off = vec2(float(x), float(y)) / stageSize;
         sceneColor += texture2D(sceneTex, displacedUV + off) * w;
         total += w;
       }
