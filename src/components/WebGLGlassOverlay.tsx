@@ -13,7 +13,7 @@ import {
 import { Canvas, useThree } from "@react-three/fiber";
 import { lip } from "@hashintel/refractive";
 import * as THREE from "three";
-import { useHTMLTexture, NATIVE_HIC_AVAILABLE, type RasterSubscription } from "../hooks/useHTMLTexture";
+import { useHTMLTexture, type RasterSubscription } from "../hooks/useHTMLTexture";
 import { GlassThumb } from "./GlassThumb";
 
 /**
@@ -78,70 +78,6 @@ function InvalidatorBridge({ targetRef }: { targetRef: { current: Invalidator } 
 }
 
 /**
- * Wraps the demo stage in a `<canvas layoutsubtree>` when native HIC is
- * available. The browser lays out the children inside the canvas but
- * does not paint them directly — only the canvas bitmap is visible.
- * Each raster (in useHTMLTexture) calls `ctx.drawElementImage(child, 0, 0)`
- * which paints the children's current rendered state into the bitmap.
- * The same canvas is then sampled as the refraction texture, so the
- * texture source IS the user-visible page background, frame-perfect.
- *
- * The canvas's bitmap size is kept in sync with its layout size scaled
- * by DPR via a ResizeObserver.
- */
-function HostCanvas({ children, hostRef }: { children: ReactNode; hostRef: RefObject<HTMLCanvasElement | null> }) {
-  const ref = useRef<HTMLCanvasElement>(null);
-
-  useEffect(() => {
-    const canvas = ref.current;
-    if (!canvas) return;
-    canvas.setAttribute("layoutsubtree", "");
-    hostRef.current = canvas;
-
-    const updateSize = () => {
-      const dpr = window.devicePixelRatio || 1;
-      const rect = canvas.getBoundingClientRect();
-      const w = Math.max(1, Math.round(rect.width * dpr));
-      const h = Math.max(1, Math.round(rect.height * dpr));
-      if (canvas.width !== w) canvas.width = w;
-      if (canvas.height !== h) canvas.height = h;
-    };
-    updateSize();
-    const ro = new ResizeObserver(updateSize);
-    ro.observe(canvas);
-    window.addEventListener("resize", updateSize);
-    return () => {
-      ro.disconnect();
-      window.removeEventListener("resize", updateSize);
-      hostRef.current = null;
-    };
-  }, [hostRef]);
-
-  return (
-    <canvas
-      ref={ref}
-      style={{
-        position: "absolute",
-        inset: 0,
-        width: "100%",
-        height: "100%",
-        display: "block",
-      }}
-    >
-      {/* The HIC spec forces direct children of a `[layoutsubtree]`
-       *  canvas to `position: static`, which breaks the stage's
-       *  `absolute inset-0` flex centering. A wrapper div absorbs the
-       *  forced-static rule and provides a normal containing block, so
-       *  the stage's positioning works exactly as in the polyfill path.
-       */}
-      <div style={{ position: "relative", width: "100%", height: "100%" }}>
-        {children}
-      </div>
-    </canvas>
-  );
-}
-
-/**
  * Provides a registry of `<GlassRect>` placeholders and overlays a single
  * `<Canvas>` (sibling of the stage) that renders one `<GlassThumb>` per
  * registered placeholder. The thumbs use a shared HTMLTexture of the stage
@@ -153,11 +89,6 @@ export function WebGLGlassOverlay({ stageRef, children }: WebGLGlassOverlayProps
   const canvasRectRef = useRef({ x: 0, y: 0, w: 1, h: 1 });
   const invalidatorRef = useRef<Invalidator>(NOOP_INVALIDATOR);
   const nextIdRef = useRef(1);
-  // The host canvas wrapping `children` when native HIC is available;
-  // its bitmap doubles as both the user-visible page background and the
-  // refraction texture source, so the WebGL texture is always a
-  // synchronous draw away. Null when running on the polyfill fallback.
-  const hostCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const [registrations, setRegistrations] = useState<Map<number, Registration>>(
     () => new Map(),
   );
@@ -218,11 +149,7 @@ export function WebGLGlassOverlay({ stageRef, children }: WebGLGlassOverlayProps
   return (
     <RegistryContext.Provider value={api}>
       <InvalidatorContext.Provider value={invalidatorRef}>
-        {NATIVE_HIC_AVAILABLE ? (
-          <HostCanvas hostRef={hostCanvasRef}>{children}</HostCanvas>
-        ) : (
-          children
-        )}
+        {children}
         <div
           ref={overlayRef}
           className="absolute inset-0 pointer-events-none"
@@ -269,7 +196,6 @@ export function WebGLGlassOverlay({ stageRef, children }: WebGLGlassOverlayProps
                 items={items}
                 onRasterRef={onRasterRef}
                 rasterSubsRef={rasterSubsRef}
-                hostCanvasRef={hostCanvasRef}
               />
             </Canvas>
           </div>
@@ -520,11 +446,10 @@ interface GlassSceneProps {
   items: Registration[];
   onRasterRef: RefObject<{ start: () => void; commit: () => void } | null>;
   rasterSubsRef: RefObject<Set<RasterSubscription>>;
-  hostCanvasRef: RefObject<HTMLCanvasElement | null>;
 }
 
-function GlassScene({ stageRef, canvasRectRef, items, onRasterRef, rasterSubsRef, hostCanvasRef }: GlassSceneProps) {
-  const sceneTex = useHTMLTexture(stageRef, true, onRasterRef, hostCanvasRef);
+function GlassScene({ stageRef, canvasRectRef, items, onRasterRef, rasterSubsRef }: GlassSceneProps) {
+  const sceneTex = useHTMLTexture(stageRef, true, onRasterRef);
   return (
     <>
       {items.map((r) => (
