@@ -1,73 +1,81 @@
-# React + TypeScript + Vite
+# hic-liquid-glass
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Apple-style **Liquid Glass** UI components, recreated in the browser on top of
+the new [**HTML-in-Canvas (HIC)**][hic] API.
 
-Currently, two official plugins are available:
+A side-by-side demo of two complementary techniques for real-time refraction of
+live page content — one cross-browser via WebGL + a custom GLSL shader, one
+Chromium-only via pure CSS.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+[hic]: https://github.com/WICG/html-in-canvas
 
-## React Compiler
+## What it shows
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+Each demo (Switch, Slider) is rendered twice, with the same draggable, springy
+interaction, so you can compare the two backends pixel-for-pixel:
 
-## Expanding the ESLint configuration
+| Backend                            | Tech                                                              | Browser support  |
+| ---------------------------------- | ----------------------------------------------------------------- | ---------------- |
+| **WebGL + GLSL**                   | HTML-in-Canvas raster + custom fragment shader (Snell's law port) | All modern       |
+| **`@hashintel/refractive`** (CSS)  | SVG displacement filter feeding `backdrop-filter`                 | Chromium only    |
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+The WebGL path uses [`three-html-render`][thr]'s polyfill so the texture
+capture works everywhere — native `drawElement()` where available, an
+`<foreignObject>` SVG fallback elsewhere. The shader is a faithful port of
+[`@hashintel/refractive`][hashintel]'s bezel + refraction math, so both panels
+in the demo produce visually equivalent output.
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+[thr]: https://www.npmjs.com/package/three-html-render
+[hashintel]: https://github.com/hashintel/hash/tree/main/libs/%40hashintel/refractive
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
+## Stack
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+- React 19 + TypeScript
+- Vite 8
+- Tailwind 4 (via `@tailwindcss/vite`)
+- `@hashintel/refractive` — CSS backend reference
+- `three-html-render` — HIC polyfill for the WebGL backend
+- `@use-gesture/react` — drag + spring physics on the switch/slider thumbs
+- oxc-standard (oxlint + oxfmt) — lint and format
+
+## Run it
+
+```sh
+npm install
+npm run dev
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+| Script            | What it does                                  |
+| ----------------- | --------------------------------------------- |
+| `npm run dev`     | Vite dev server with HMR                      |
+| `npm run build`   | `tsc -b && vite build`                        |
+| `npm run preview` | Serve the production build                    |
+| `npm run lint`    | `oxlint --fix .` followed by `oxfmt .`        |
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+## Layout
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
 ```
+src/
+├── App.tsx                       # 2×2 grid: {Switch, Slider} × {WebGL, refractive}
+├── main.tsx                      # installs the three-html-render HIC polyfill
+├── components/
+│   ├── GlassBackend.tsx          # context switching WebGL ↔ refractive per demo
+│   ├── GlassRect.tsx             # picks the backend component
+│   ├── DisplacementGlass.tsx     # WebGL backend (HIC → texture → shader)
+│   ├── DemoShell.tsx             # shared chrome (title, params panel, theme)
+│   └── …
+├── demos/
+│   ├── SwitchDemo.tsx
+│   └── SliderDemo.tsx
+├── shaders/
+│   └── glass.frag                # GLSL refraction (port of @hashintel/refractive)
+└── hooks/
+    └── useRefractionParams.ts    # shared IOR / blur / bezel-height controls
+```
+
+## Credits
+
+Inspired by [@kube_io's CSS-only liquid glass write-up][kube] and the
+[Hash team's `@hashintel/refractive`][hashintel].
+
+[kube]: https://kube.io/blog/liquid-glass-css-svg

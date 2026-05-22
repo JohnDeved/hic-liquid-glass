@@ -1,7 +1,14 @@
 {
-  "name": "refract-ui",
+  "name": "hic-liquid-glass",
   "version": "0.0.0",
   "private": true,
+  "description": "Apple-style Liquid Glass UI components built on the new HTML-in-Canvas (HIC) browser API.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/JohnDeved/hic-liquid-glass.git"
+  },
+  "homepage": "https://github.com/JohnDeved/hic-liquid-glass#readme",
+  "license": "MIT",
   "type": "module",
   "scripts": {
     "dev": "vite",
