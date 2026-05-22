@@ -1,15 +1,9 @@
 import { useEffect } from "react";
 
 /**
- * When `pressed` is true, listen for window/tab/context-menu interruptions
- * that can swallow the matching pointerup (and would otherwise leave the
- * pointer-driven UI in a stuck "pressed" state). Fires `release` on any
- * such interrupt.
- *
- * Common triggers:
- *  - right-click during press → contextmenu (no pointerup)
- *  - alt-tab / minimize → window blur (no pointerup)
- *  - tab switch → document visibilitychange (no pointerup)
+ * Fires `release` if a window/tab/context-menu interrupt swallows the
+ * matching pointerup (blur, visibility change, contextmenu). Without
+ * this, the pointer-driven UI gets stuck in a "pressed" state.
  */
 export function useReleaseOnInterrupt(
   pressed: boolean,

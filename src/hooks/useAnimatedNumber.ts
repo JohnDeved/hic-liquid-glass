@@ -5,17 +5,12 @@ type Easing = (t: number) => number;
 const smoothstep: Easing = (t) => t * t * (3 - 2 * t);
 
 /**
- * Smoothly animates a numeric value toward `target` via requestAnimationFrame.
- *
- * Why JS animation instead of CSS transitions? When a glass element refracts
- * the surrounding DOM via three-html-render (HIC + foreignObject polyfill),
- * the polyfill rasterizes a clone of the DOM each frame without transition
- * state, so CSS-animated properties snap to their final value inside the
- * texture while the live DOM still interpolates. Driving the inline-style
- * value itself keeps the texture and the live DOM in sync.
- *
- * When `instant` is true, the value snaps to `target` without animating
- * (useful while the user is actively driving the value, e.g. dragging).
+ * Smoothly animates a numeric value toward `target` via rAF. We drive the
+ * inline-style value in JS (not CSS transitions) because the HIC polyfill
+ * captures a clone of the DOM without transition state, so CSS-animated
+ * properties snap to their final value inside the texture while the live
+ * DOM still interpolates. When `instant` is true, snaps without animating
+ * (useful while the user is dragging).
  */
 export function useAnimatedNumber(
   target: number,
