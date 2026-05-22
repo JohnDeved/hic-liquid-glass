@@ -37,7 +37,7 @@ export default function App() {
       <main className="grid grid-cols-2 gap-x-8 gap-y-4 max-w-[1400px] mx-auto px-6 pb-16 relative before:content-[''] before:absolute before:top-0 before:bottom-0 before:left-1/2 before:w-px before:bg-[var(--ui-border)]">
         <div className="mb-6">
           <div className="text-[0.8rem] font-semibold uppercase tracking-[0.08em] opacity-50">
-            Three.js + GLSL · via{" "}
+            WebGL + GLSL · via{" "}
             <a href="https://github.com/WICG/html-in-canvas" target="_blank" rel="noreferrer"
               className="text-inherit underline underline-offset-2">
               HTML-in-Canvas
@@ -45,10 +45,14 @@ export default function App() {
             {" "}<span className="inline-block text-[0.7rem] bg-emerald-500/15 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 px-2.5 py-0.5 rounded-[5px] tracking-[0.02em] normal-case">Cross-browser</span>
           </div>
           <p className="text-[0.82rem] opacity-55 mt-2 leading-relaxed">
-            Every frame, the surrounding HTML is painted into a texture (using
-            the new HTML-in-Canvas API, or a foreignObject SVG fallback on
-            browsers that don't have it yet). A Three.js mesh then refracts
-            that texture in a GLSL shader. Works in any browser.
+            The thumb is a regular CSS-styled <code className="text-[0.78rem] px-1 py-0.5 rounded bg-[var(--ui-border)]">div</code>{" "}
+            so its position, color, and shadow animate compositor-native. A
+            child <code className="text-[0.78rem] px-1 py-0.5 rounded bg-[var(--ui-border)]">canvas</code> runs a
+            GLSL shader that paints only the bezel refraction, sampling a
+            texture of the surrounding HTML (captured via the new
+            HTML-in-Canvas API, or a foreignObject SVG fallback elsewhere).
+            The texture is re-rastered only when the surrounding DOM
+            actually changes. Works in any browser.
           </p>
         </div>
         <div className="mb-6">
