@@ -146,12 +146,6 @@ export function WebGLGlassOverlay({ stageRef, children }: WebGLGlassOverlayProps
               <ShadowProxy key={r.id} el={r.el} radius={r.refraction.radius} />
             ))}
           </div>
-          <CanvasRectTracker
-            items={items}
-            overlayRef={overlayRef}
-            canvasWrapRef={canvasWrapRef}
-            canvasRectRef={canvasRectRef}
-          />
           <div
             ref={canvasWrapRef}
             style={{
@@ -175,6 +169,12 @@ export function WebGLGlassOverlay({ stageRef, children }: WebGLGlassOverlayProps
               frameloop="demand"
             >
               <InvalidatorBridge targetRef={invalidatorRef} />
+              <CanvasRectUpdater
+                items={items}
+                overlayRef={overlayRef}
+                canvasWrapRef={canvasWrapRef}
+                canvasRectRef={canvasRectRef}
+              />
               <GlassScene
                 stageRef={stageRef}
                 canvasRectRef={canvasRectRef}
@@ -301,7 +301,7 @@ function ShadowProxy({ el, radius }: { el: HTMLElement; radius: number }) {
   );
 }
 
-interface CanvasRectTrackerProps {
+interface CanvasRectUpdaterProps {
   items: Registration[];
   overlayRef: RefObject<HTMLDivElement | null>;
   canvasWrapRef: RefObject<HTMLDivElement | null>;
@@ -313,139 +313,74 @@ interface CanvasRectTrackerProps {
 const CANVAS_PADDING = 16;
 
 /**
- * Computes the tight bounding rect that the WebGL canvas needs to cover —
- * the union of all placeholder bounding rects plus a small padding — and
- * applies it to `canvasWrapRef` as inline width/height + transform. The
- * size is layout-based (offsetWidth/Height) so it stays stable during
- * drags; only the transform changes per frame as the placeholder moves.
+ * Inside-Canvas counterpart that runs every R3F frame to:
+ *  1. measure the placeholder union rect,
+ *  2. apply the rect to the wrap div (transform + size),
+ *  3. store it in `canvasRectRef` for `RegisteredGlass` to read in the
+ *     SAME frame.
  *
- * Runs the same event-driven update pattern as ShadowProxy (mutation,
- * resize, scroll, transition/animation events + a continuous loop while
- * any transition is in flight) and pokes `invalidator` so the R3F frame
- * loop wakes up to re-read the new rect.
+ * Doing this in `useFrame` (rather than a separate DOM-side rAF loop) is
+ * essential: it keeps the wrap's CSS transform and the shader's
+ * `canvasCenter` uniform in lockstep. A previous DOM-side tracker raced
+ * with R3F's render and produced a 1-frame skew that looked like jitter
+ * during slider drags.
  */
-function CanvasRectTracker({
+function CanvasRectUpdater({
   items,
   overlayRef,
   canvasWrapRef,
   canvasRectRef,
-}: CanvasRectTrackerProps) {
-  const invalidator = useGlassInvalidator();
+}: CanvasRectUpdaterProps) {
+  const lastRef = useRef({ x: NaN, y: NaN, w: -1, h: -1 });
 
-  useEffect(() => {
+  useFrame(() => {
     const overlay = overlayRef.current;
     const wrap = canvasWrapRef.current;
     if (!overlay || !wrap || items.length === 0) return;
 
-    let lastW = -1;
-    let lastH = -1;
-    let lastX = Number.NaN;
-    let lastY = Number.NaN;
-
-    const measure = () => {
-      const ovRect = overlay.getBoundingClientRect();
-      let minX = Infinity;
-      let minY = Infinity;
-      let maxX = -Infinity;
-      let maxY = -Infinity;
-      let maxLayoutW = 0;
-      let maxLayoutH = 0;
-      for (const r of items) {
-        const el = r.el;
-        const er = el.getBoundingClientRect();
-        const cx = er.left + er.width / 2;
-        const cy = er.top + er.height / 2;
-        // Use layout size (not transformed bounding rect) so the canvas
-        // doesn't bounce as the thumb scales — center around the bounding
-        // box but size from the untransformed layout extent.
-        const lw = el.offsetWidth || er.width;
-        const lh = el.offsetHeight || er.height;
-        maxLayoutW = Math.max(maxLayoutW, lw);
-        maxLayoutH = Math.max(maxLayoutH, lh);
-        minX = Math.min(minX, cx - lw / 2);
-        minY = Math.min(minY, cy - lh / 2);
-        maxX = Math.max(maxX, cx + lw / 2);
-        maxY = Math.max(maxY, cy + lh / 2);
-      }
-      if (!isFinite(minX)) return;
-      const x = minX - CANVAS_PADDING - ovRect.left;
-      const y = minY - CANVAS_PADDING - ovRect.top;
-      const w = Math.ceil(maxX - minX + CANVAS_PADDING * 2);
-      const h = Math.ceil(maxY - minY + CANVAS_PADDING * 2);
-      canvasRectRef.current.x = x;
-      canvasRectRef.current.y = y;
-      canvasRectRef.current.w = w;
-      canvasRectRef.current.h = h;
-      if (w !== lastW || h !== lastH) {
-        wrap.style.width = `${w}px`;
-        wrap.style.height = `${h}px`;
-        lastW = w;
-        lastH = h;
-      }
-      if (x !== lastX || y !== lastY) {
-        wrap.style.transform = `translate(${x}px, ${y}px)`;
-        lastX = x;
-        lastY = y;
-      }
-      invalidator.current();
-    };
-
-    let raf = 0;
-    const schedule = () => {
-      if (!raf) raf = requestAnimationFrame(() => { raf = 0; measure(); });
-    };
-
-    measure();
-
-    const elObs = new ResizeObserver(schedule);
-    const attrObs = new MutationObserver(schedule);
+    const ovRect = overlay.getBoundingClientRect();
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
     for (const r of items) {
-      elObs.observe(r.el);
-      attrObs.observe(r.el, { attributes: true, attributeFilter: ["style", "class"] });
+      const el = r.el;
+      const er = el.getBoundingClientRect();
+      const cx = er.left + er.width / 2;
+      const cy = er.top + er.height / 2;
+      // Layout size keeps the canvas stable while the thumb scales.
+      const lw = el.offsetWidth || er.width;
+      const lh = el.offsetHeight || er.height;
+      minX = Math.min(minX, cx - lw / 2);
+      minY = Math.min(minY, cy - lh / 2);
+      maxX = Math.max(maxX, cx + lw / 2);
+      maxY = Math.max(maxY, cy + lh / 2);
     }
-    const ovObs = new ResizeObserver(schedule);
-    ovObs.observe(overlay);
+    if (!isFinite(minX)) return;
 
-    let activeAnims = 0;
-    let loopRaf = 0;
-    const loop = () => {
-      measure();
-      loopRaf = activeAnims > 0 ? requestAnimationFrame(loop) : 0;
-    };
-    const startLoop = () => { if (!loopRaf) loopRaf = requestAnimationFrame(loop); };
-    const onAnimStart = () => { activeAnims++; startLoop(); };
-    const onAnimEnd = () => { activeAnims = Math.max(0, activeAnims - 1); };
+    const x = minX - CANVAS_PADDING - ovRect.left;
+    const y = minY - CANVAS_PADDING - ovRect.top;
+    const w = Math.ceil(maxX - minX + CANVAS_PADDING * 2);
+    const h = Math.ceil(maxY - minY + CANVAS_PADDING * 2);
 
-    for (const r of items) {
-      r.el.addEventListener("transitionrun", onAnimStart);
-      r.el.addEventListener("transitionend", onAnimEnd);
-      r.el.addEventListener("transitioncancel", onAnimEnd);
-      r.el.addEventListener("animationstart", onAnimStart);
-      r.el.addEventListener("animationend", onAnimEnd);
-      r.el.addEventListener("animationcancel", onAnimEnd);
+    canvasRectRef.current.x = x;
+    canvasRectRef.current.y = y;
+    canvasRectRef.current.w = w;
+    canvasRectRef.current.h = h;
+
+    const last = lastRef.current;
+    if (w !== last.w || h !== last.h) {
+      wrap.style.width = `${w}px`;
+      wrap.style.height = `${h}px`;
+      last.w = w;
+      last.h = h;
     }
-
-    window.addEventListener("scroll", schedule, { passive: true, capture: true });
-    window.addEventListener("resize", schedule);
-
-    return () => {
-      if (raf) cancelAnimationFrame(raf);
-      if (loopRaf) cancelAnimationFrame(loopRaf);
-      elObs.disconnect();
-      attrObs.disconnect();
-      ovObs.disconnect();
-      for (const r of items) {
-        r.el.removeEventListener("transitionrun", onAnimStart);
-        r.el.removeEventListener("transitionend", onAnimEnd);
-        r.el.removeEventListener("transitioncancel", onAnimEnd);
-        r.el.removeEventListener("animationstart", onAnimStart);
-        r.el.removeEventListener("animationend", onAnimEnd);
-        r.el.removeEventListener("animationcancel", onAnimEnd);
-      }
-      window.removeEventListener("scroll", schedule, true);
-      window.removeEventListener("resize", schedule);
-    };
-  }, [items, overlayRef, canvasWrapRef, canvasRectRef, invalidator]);
+    if (x !== last.x || y !== last.y) {
+      wrap.style.transform = `translate(${x}px, ${y}px)`;
+      last.x = x;
+      last.y = y;
+    }
+  });
 
   return null;
 }
