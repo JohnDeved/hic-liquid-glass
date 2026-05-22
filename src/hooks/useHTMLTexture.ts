@@ -3,6 +3,25 @@ import { useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
 import { getHtmlRenderer } from "three-html-render/polyfill";
 
+// Native HTML-in-Canvas (WICG) detection. When available the host canvas
+// surrounding the captured element can be repainted synchronously via
+// `ctx.drawElementImage(el, ...)` — ~0.2ms vs ~16ms for the polyfill's
+// SVG-foreignObject round-trip — eliminating the async raster lag that
+// produced drag-time skew between the mesh and the refracted content.
+//
+// We detect TRUE native support: the API is present AND the
+// three-html-render polyfill has NOT installed itself. The polyfill
+// shims `drawElementImage` onto the same prototype, so a naive
+// `'drawElementImage' in proto` check returns true even on browsers
+// without native HIC. The polyfill sets `window.__HTML_IN_CANVAS_POLYFILL__`
+// to flag its install; if that's true, the API on the prototype is
+// the polyfill's slow SVG-backed version, not the native fast one.
+export const NATIVE_HIC_AVAILABLE: boolean =
+  typeof CanvasRenderingContext2D !== "undefined" &&
+  "drawElementImage" in CanvasRenderingContext2D.prototype &&
+  !(typeof window !== "undefined" &&
+    (window as unknown as { __HTML_IN_CANVAS_POLYFILL__?: boolean }).__HTML_IN_CANVAS_POLYFILL__);
+
 /**
  * Wraps an HTMLElement as a live THREE.Texture using the HTML-in-Canvas
  * (WICG) API + three-html-render polyfill.
@@ -32,7 +51,13 @@ export function useHTMLTexture(
     start: () => void;
     commit: () => void;
   } | null>,
+  hostCanvasRef?: React.RefObject<HTMLCanvasElement | null>,
 ): THREE.Texture {
+  // Native path is selected when the browser supports HIC AND the caller
+  // provided a host canvas whose direct child is `elementRef`. Rasters
+  // become synchronous, so the snapshot/commit/upload happens in a single
+  // tick and the texture is never out of date relative to the mesh.
+  const useNative = NATIVE_HIC_AVAILABLE && !!hostCanvasRef;
   const fallbackCanvas = useMemo(() => {
     const c = document.createElement("canvas");
     c.width = 1;
@@ -73,7 +98,56 @@ export function useHTMLTexture(
     const el = elementRef.current;
     if (!el) return;
 
-    const markDirty = () => { dirtyRef.current = true; invalidate(); };
+    // Native HIC raster: synchronous draw of the captured element into
+    // the host canvas. Fast enough (sub-ms) to run on every dirty signal
+    // without needing a deferred useFrame raster pass. The native API
+    // requires the captured element be an immediate child of the host
+    // canvas, so we capture the wrapper (HostCanvas's first child) —
+    // its pixels are identical to the stage's since the stage fills it
+    // exactly via `absolute inset-0`.
+    const nativeRaster = () => {
+      const host = hostCanvasRef?.current;
+      if (!host) return false;
+      const captureTarget = host.firstElementChild as HTMLElement | null;
+      if (!captureTarget) return false;
+      const ctx = host.getContext("2d");
+      if (!ctx) return false;
+      try {
+        ctx.clearRect(0, 0, host.width, host.height);
+        ctx.drawElementImage(captureTarget, 0, 0);
+      } catch {
+        // Native call failed (e.g. element not yet a child of canvas
+        // during initial mount). Bail; the next mutation tick will retry.
+        return false;
+      }
+      if (texture.image !== host) {
+        texture.image = host;
+        currentCanvasRef.current = host;
+        lastSizeRef.current = { w: host.width, h: host.height };
+      }
+      texture.needsUpdate = true;
+      return true;
+    };
+
+    const markDirty = () => {
+      if (useNative) {
+        // Snapshot live DOM, draw it into the host canvas, commit, all
+        // in one synchronous step. No skew is possible because nothing
+        // is deferred.
+        onRasterRef?.current?.start();
+        if (!nativeRaster()) {
+          // If the native draw failed, fall back to deferred dirty so
+          // the useFrame polyfill path picks it up next tick (only
+          // relevant if the host canvas isn't ready yet).
+          dirtyRef.current = true;
+        }
+        onRasterRef?.current?.commit();
+        invalidate();
+        return;
+      }
+      dirtyRef.current = true;
+      invalidate();
+    };
 
     // A placeholder-only DOM change (the invisible GlassRect placeholder
     // moving / scaling during drag) doesn't affect rasterized pixels, so
@@ -154,8 +228,12 @@ export function useHTMLTexture(
     el.addEventListener("animationend", onAnimEnd);
     el.addEventListener("animationcancel", onAnimEnd);
 
+    // Initial native draw on mount so the texture is populated before
+    // the first frame renders. Otherwise the texture would stay at the
+    // 1×1 fallback canvas until the first DOM mutation fires.
+    if (useNative) markDirty();
+
     return () => {
-      subtreeObs.disconnect();
       rootObs.disconnect();
       resizeObs.disconnect();
       window.removeEventListener("resize", markDirty);
@@ -167,9 +245,10 @@ export function useHTMLTexture(
       el.removeEventListener("animationend", onAnimEnd);
       el.removeEventListener("animationcancel", onAnimEnd);
     };
-  }, [elementRef, invalidate, onRasterRef]);
+  }, [elementRef, invalidate, onRasterRef, useNative, hostCanvasRef, texture]);
 
   useFrame(() => {
+    if (useNative) return;
     if (!enabled || !dirtyRef.current || pendingRef.current) return;
     const el = elementRef.current;
     if (!el) return;
