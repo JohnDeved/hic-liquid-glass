@@ -96,13 +96,19 @@ export function GlassThumb({
     if (!mesh) return;
 
     const u = (mesh.material as THREE.ShaderMaterial).uniforms;
+    syncUniforms(u);
+    syncSceneTexture(u, mesh, gl, scene, camera);
+
+    mesh.position.set(position[0], position[1], position[2]);
+    mesh.scale.setScalar(scaleRef ? scaleRef.v : scale);
+  });
+
+  function syncUniforms(u: Record<string, THREE.IUniform>) {
     u.thumbPos.value.set(position[0], position[1]);
     u.resolution.value.set(size.width, size.height);
     u.glassSize.value.set(width, height);
     u.cornerRadius.value = radius;
     u.bezelWidth.value = bezelWidth;
-    u.glassThickness.value = glassThickness;
-    u.bezelType.value = bezelType;
     u.glassThickness.value = glassThickness;
     u.ior.value = ior;
     u.blurAmount.value = blur;
@@ -111,24 +117,29 @@ export function GlassThumb({
     if (bgColorRef) {
       u.bgColor.value.set(bgColorRef.r, bgColorRef.g, bgColorRef.b, bgColorRef.a);
     }
+  }
 
+  function syncSceneTexture(
+    u: Record<string, THREE.IUniform>,
+    mesh: THREE.Mesh,
+    gl: THREE.WebGLRenderer,
+    scene: THREE.Scene,
+    camera: THREE.Camera,
+  ) {
     if (sceneTex) {
       u.sceneTex.value = sceneTex;
-    } else {
-      // Fallback: render the scene (minus the glass) into an FBO and use
-      // it as the refraction source. Kept for compatibility / non-HIC use.
-      mesh.visible = false;
-      gl.setRenderTarget(fbo);
-      gl.clear();
-      gl.render(scene, camera);
-      gl.setRenderTarget(null);
-      mesh.visible = true;
-      u.sceneTex.value = fbo.texture;
+      return;
     }
-
-    mesh.position.set(position[0], position[1], position[2]);
-    mesh.scale.setScalar(scaleRef ? scaleRef.v : scale);
-  });
+    // Fallback: render the scene (minus the glass) into an FBO and use
+    // it as the refraction source. Kept for compatibility / non-HIC use.
+    mesh.visible = false;
+    gl.setRenderTarget(fbo);
+    gl.clear();
+    gl.render(scene, camera);
+    gl.setRenderTarget(null);
+    mesh.visible = true;
+    u.sceneTex.value = fbo.texture;
+  }
 
   return (
     <mesh ref={meshRef}>
