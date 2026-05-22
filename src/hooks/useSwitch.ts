@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useState, useCallback, useRef } from "react";
 import { useDrag } from "@use-gesture/react";
 import { rubberBandClamp, opaqueOn, TRACK_RGBA, TR_SWITCH, TR_SWITCH_PRESS } from "../utils";
 import { useAnimatedNumber } from "./useAnimatedNumber";
+import { useReleaseOnInterrupt } from "./useReleaseOnInterrupt";
 
 const MAX_X = 57.9;
 
@@ -9,6 +10,7 @@ export function useSwitch() {
   const [active, setActive] = useState(true);
   const [pressed, setPressed] = useState(false);
   const [thumbX, setThumbX] = useState(0);
+  const wrapperRef = useRef<HTMLDivElement>(null);
 
   const bind = useDrag(({ down, movement: [mx] }) => {
     setPressed(down);
@@ -20,6 +22,12 @@ export function useSwitch() {
     }
     setThumbX(rubberBandClamp((active ? MAX_X : 0) + mx, 0, MAX_X, 40));
   }, { pointer: { capture: true } });
+
+  const forceRelease = useCallback(() => {
+    setPressed(false);
+    setThumbX(0);
+  }, []);
+  useReleaseOnInterrupt(pressed, forceRelease, wrapperRef);
 
   const displayX = pressed ? thumbX : active ? MAX_X : 0;
   const ratio = Math.max(0, Math.min(1, displayX / MAX_X));
@@ -36,7 +44,7 @@ export function useSwitch() {
   const thumbShadow = pressed ? "0 6px 30px rgba(0,0,0,0.18)" : "0 4px 22px rgba(0,0,0,0.1)";
 
   return {
-    bind, active, pressed, displayX, trackColor,
+    bind, wrapperRef, active, pressed, displayX, trackColor,
     thumbTransition, thumbScale, thumbBg, thumbShadow,
   };
 }

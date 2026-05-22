@@ -1,7 +1,8 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useCallback } from "react";
 import { useDrag } from "@use-gesture/react";
 import { rubberBandClamp, TR_SLIDER, TR_SLIDER_SMOOTH, TR_SLIDER_DRAG } from "../utils";
 import { useAnimatedNumber } from "./useAnimatedNumber";
+import { useReleaseOnInterrupt } from "./useReleaseOnInterrupt";
 
 const TRACK_WIDTH = 330;
 
@@ -56,6 +57,14 @@ export function useSlider() {
     if (down && !first) handleMove(x);
     if (!down) handleRelease(x, moved);
   }, { pointer: { capture: true } });
+
+  const forceRelease = useCallback(() => {
+    if (releaseTimer.current) { clearTimeout(releaseTimer.current); releaseTimer.current = null; }
+    setPressed(false);
+    setMotionMode("smooth");
+    setRawPct((p) => Math.round(p));
+  }, []);
+  useReleaseOnInterrupt(pressed, forceRelease, wrapperRef);
 
   const dragging = motionMode === "instant";
   const thumbLeft = (pressed ? rawPct : value) / 100 * TRACK_WIDTH;

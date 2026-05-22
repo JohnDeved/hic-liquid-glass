@@ -10,6 +10,8 @@
 body {
   overflow-x: hidden;
   background-color: #0f0f14;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 /* ── Theme variables (light / dark) ── */

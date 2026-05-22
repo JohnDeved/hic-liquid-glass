@@ -17,6 +17,7 @@ export function SwitchDemo() {
       {() => (
         <div
           {...sw.bind()}
+          ref={sw.wrapperRef}
           className="w-[160px] h-[67px] rounded-[33.5px] relative cursor-pointer touch-none shadow-[inset_0_2px_6px_rgba(0,0,0,0.35)]"
           style={{ backgroundColor: sw.trackColor }}
         >
