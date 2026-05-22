@@ -1,6 +1,6 @@
-import { PARAM_CONFIG, type useRefractionParams } from "../hooks/useRefractionParams";
+import { PARAM_CONFIG, type useRefractionParams } from '../hooks/useRefractionParams'
 
-type Props = ReturnType<typeof useRefractionParams>;
+type Props = ReturnType<typeof useRefractionParams>
 
 export function Params({ params, set }: Props) {
   return (
@@ -12,8 +12,8 @@ export function Params({ params, set }: Props) {
         <div className="h-px flex-1 bg-[var(--ui-border)]" />
       </div>
       {PARAM_CONFIG.map(({ key, label, min, max, step }) => {
-        const v = params[key];
-        const display = step < 1 ? v.toFixed(2) : step < 10 ? v.toFixed(1) : String(v);
+        const v = params[key]
+        const display = step < 1 ? v.toFixed(2) : step < 10 ? v.toFixed(1) : String(v)
         return (
           <div key={key} className="flex items-center gap-4">
             <label className="w-56 uppercase tracking-[0.08em] text-[11px] opacity-80 select-none leading-tight shrink-0">
@@ -23,14 +23,18 @@ export function Params({ params, set }: Props) {
               {display}
             </span>
             <input
-              type="range" min={min} max={max} step={step} value={v}
+              type="range"
+              min={min}
+              max={max}
+              step={step}
+              value={v}
               onChange={e => set(key)(Number(e.target.value))}
               className="flex-1"
               aria-label={label}
             />
           </div>
-        );
+        )
       })}
     </div>
-  );
+  )
 }

@@ -1,8 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from 'react'
 
-type Easing = (t: number) => number;
+type Easing = (t: number) => number
 
-const smoothstep: Easing = (t) => t * t * (3 - 2 * t);
+const smoothstep: Easing = t => t * t * (3 - 2 * t)
 
 /**
  * Smoothly animates a numeric value toward `target` via rAF. We drive the
@@ -14,35 +14,35 @@ const smoothstep: Easing = (t) => t * t * (3 - 2 * t);
  */
 export function useAnimatedNumber(
   target: number,
-  options: { duration?: number; easing?: Easing; instant?: boolean } = {},
+  options: { duration?: number; easing?: Easing; instant?: boolean } = {}
 ): number {
-  const { duration = 300, easing = smoothstep, instant = false } = options;
-  const [value, setValue] = useState(target);
-  const fromRef = useRef(target);
-  const rafRef = useRef(0);
+  const { duration = 300, easing = smoothstep, instant = false } = options
+  const [value, setValue] = useState(target)
+  const fromRef = useRef(target)
+  const rafRef = useRef(0)
 
   useEffect(() => {
-    cancelAnimationFrame(rafRef.current);
+    cancelAnimationFrame(rafRef.current)
     if (instant) {
-      fromRef.current = target;
+      fromRef.current = target
       // eslint-disable-next-line react-hooks/set-state-in-effect
-      setValue(target);
-      return;
+      setValue(target)
+      return
     }
-    const from = fromRef.current;
-    const to = target;
-    if (from === to) return;
-    const t0 = performance.now();
+    const from = fromRef.current
+    const to = target
+    if (from === to) return
+    const t0 = performance.now()
     const tick = () => {
-      const t = Math.min(1, (performance.now() - t0) / duration);
-      const v = from + (to - from) * easing(t);
-      fromRef.current = v;
-      setValue(v);
-      if (t < 1) rafRef.current = requestAnimationFrame(tick);
-    };
-    rafRef.current = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(rafRef.current);
-  }, [target, instant, duration, easing]);
+      const t = Math.min(1, (performance.now() - t0) / duration)
+      const v = from + (to - from) * easing(t)
+      fromRef.current = v
+      setValue(v)
+      if (t < 1) rafRef.current = requestAnimationFrame(tick)
+    }
+    rafRef.current = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(rafRef.current)
+  }, [target, instant, duration, easing])
 
-  return value;
+  return value
 }

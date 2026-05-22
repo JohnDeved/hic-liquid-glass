@@ -1,16 +1,16 @@
-import { lip } from "@hashintel/refractive";
-import { useSwitch } from "../hooks/useSwitch";
-import { useRefractionParams, buildRefraction } from "../hooks/useRefractionParams";
-import { DemoShell } from "../components/DemoShell";
-import { Params } from "../components/Params";
-import { GlassRect } from "../components/GlassRect";
+import { lip } from '@hashintel/refractive'
+import { useSwitch } from '../hooks/useSwitch'
+import { useRefractionParams, buildRefraction } from '../hooks/useRefractionParams'
+import { DemoShell } from '../components/DemoShell'
+import { Params } from '../components/Params'
+import { GlassRect } from '../components/GlassRect'
 
 const SWITCH_DESC =
-  "A lip bezel: convex on the outside, concave toward the middle. The center stays roughly 1:1 while the edges pull the background in.";
+  'A lip bezel: convex on the outside, concave toward the middle. The center stays roughly 1:1 while the edges pull the background in.'
 
 export function SwitchDemo() {
-  const sw = useSwitch();
-  const rp = useRefractionParams({ specular: 0.5, refraction: 1.0, blur: 0.2 });
+  const sw = useSwitch()
+  const rp = useRefractionParams({ specular: 0.5, refraction: 1, blur: 0.2 })
 
   return (
     <DemoShell title="Switch" description={SWITCH_DESC} touchNone params={<Params {...rp} />}>
@@ -29,10 +29,14 @@ export function SwitchDemo() {
               boxShadow: sw.thumbShadow,
               transition: sw.thumbTransition,
             }}
-            refraction={buildRefraction(rp.params, { radius: 46, bezelWidth: 18, bezelHeightFn: lip })}
+            refraction={buildRefraction(rp.params, {
+              radius: 46,
+              bezelWidth: 18,
+              bezelHeightFn: lip,
+            })}
           />
         </div>
       )}
     </DemoShell>
-  );
+  )
 }

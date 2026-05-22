@@ -1,0 +1,8 @@
+{
+  "extends": ["./node_modules/oxc-standard/.oxlintrc.json"],
+  "settings": {
+    "react": {
+      "version": "19"
+    }
+  }
+}
