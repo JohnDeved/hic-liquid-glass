@@ -1,6 +1,7 @@
-import { useState, useEffect, useRef } from "react";
+import { useState } from "react";
 import { useDrag } from "@use-gesture/react";
 import { rubberBandClamp, opaqueOn, TRACK_RGBA, TR_SWITCH, TR_SWITCH_PRESS } from "../utils";
+import { useAnimatedNumber } from "./useAnimatedNumber";
 
 const MAX_X = 57.9;
 
@@ -23,46 +24,11 @@ export function useSwitch() {
   const displayX = pressed ? thumbX : active ? MAX_X : 0;
   const ratio = Math.max(0, Math.min(1, displayX / MAX_X));
 
-  // Drive the rail color via JS-animated ratio rather than a CSS transition.
-  // The HIC polyfill rasterizes a clone of the DOM each frame and never
-  // observes CSS transitions, so a CSS-driven rail color would snap to its
-  // final value inside the glass texture while the surrounding real DOM
-  // still interpolates. Animating the ratio in JS keeps the inline-style
-  // value itself in sync, so both the texture and the live DOM agree.
   const targetRatio = pressed ? ratio : active ? 1 : 0;
-  const [animRatio, setAnimRatio] = useState(targetRatio);
-  const fromRef = useRef(targetRatio);
-  const rafRef = useRef(0);
+  const animRatio = useAnimatedNumber(targetRatio, { duration: 250, instant: pressed });
 
-  useEffect(() => {
-    cancelAnimationFrame(rafRef.current);
-    if (pressed) {
-      fromRef.current = targetRatio;
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setAnimRatio(targetRatio);
-      return;
-    }
-    const from = fromRef.current;
-    const to = targetRatio;
-    if (from === to) return;
-    const t0 = performance.now();
-    const dur = 250;
-    const tick = () => {
-      const t = Math.min(1, (performance.now() - t0) / dur);
-      const eased = t * t * (3 - 2 * t);
-      const v = from + (to - from) * eased;
-      fromRef.current = v;
-      setAnimRatio(v);
-      if (t < 1) rafRef.current = requestAnimationFrame(tick);
-    };
-    rafRef.current = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(rafRef.current);
-  }, [targetRatio, pressed]);
-
-  const trackColor = (() => {
-    const [r, g, b, a] = TRACK_RGBA.off.map((v, i) => v + (TRACK_RGBA.on[i] - v) * animRatio);
-    return opaqueOn(Math.round(r), Math.round(g), Math.round(b), a);
-  })();
+  const [r, g, b, a] = TRACK_RGBA.off.map((v, i) => v + (TRACK_RGBA.on[i] - v) * animRatio);
+  const trackColor = opaqueOn(Math.round(r), Math.round(g), Math.round(b), a);
 
   const thumbTransition = pressed ? TR_SWITCH_PRESS : TR_SWITCH;
   const thumbScale = pressed ? 1.0 : 0.65;

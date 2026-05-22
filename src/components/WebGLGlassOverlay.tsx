@@ -246,9 +246,6 @@ function RegisteredGlass({ reg, overlayRef, sceneTex }: RegisteredGlassProps) {
     // Read the placeholder's computed background color and feed it to the
     // shader as the bg-overlay color. The placeholder itself is opacity:0,
     // so this is the only way its bg-color reaches the rendered output.
-    // Read the placeholder's computed background color and feed it to the
-    // shader as the bg-overlay color. The placeholder itself is opacity:0,
-    // so this is the only way its bg-color reaches the rendered output.
     parseCssColor(getComputedStyle(el).backgroundColor, bgColorRef.current);
 
     if (layoutW !== size.w || layoutH !== size.h) {
@@ -286,26 +283,26 @@ function RegisteredGlass({ reg, overlayRef, sceneTex }: RegisteredGlassProps) {
 }
 
 /**
- * Parses CSS color strings ("rgb(...)", "rgba(...)", "#hex", "transparent")
- * into normalized 0-1 RGBA. Writes into the provided target to avoid alloc.
- * Falls back to opaque white on parse failure.
+ * Parses a `getComputedStyle().backgroundColor` value ("rgb(...)", "rgba(...)",
+ * or "transparent") into normalized 0-1 RGBA. Writes into the provided target
+ * to avoid alloc. Falls back to opaque white on parse failure.
  */
+const RGBA_RE = /^rgba?\(([^)]+)\)$/;
+
+function writeRGBA(
+  out: { r: number; g: number; b: number; a: number },
+  r: number, g: number, b: number, a: number,
+) {
+  out.r = r; out.g = g; out.b = b; out.a = a;
+}
+
 function parseCssColor(
   s: string,
   out: { r: number; g: number; b: number; a: number },
 ) {
-  if (!s || s === "transparent") {
-    out.r = 0; out.g = 0; out.b = 0; out.a = 0;
-    return;
-  }
-  const m = s.match(/^rgba?\(([^)]+)\)$/);
-  if (m) {
-    const p = m[1].split(",").map((x) => parseFloat(x.trim()));
-    out.r = (p[0] ?? 255) / 255;
-    out.g = (p[1] ?? 255) / 255;
-    out.b = (p[2] ?? 255) / 255;
-    out.a = p[3] ?? 1;
-    return;
-  }
-  out.r = 1; out.g = 1; out.b = 1; out.a = 1;
+  if (!s || s === "transparent") return writeRGBA(out, 0, 0, 0, 0);
+  const m = s.match(RGBA_RE);
+  if (!m) return writeRGBA(out, 1, 1, 1, 1);
+  const p = m[1].split(",").map((x) => parseFloat(x.trim()));
+  writeRGBA(out, (p[0] ?? 255) / 255, (p[1] ?? 255) / 255, (p[2] ?? 255) / 255, p[3] ?? 1);
 }

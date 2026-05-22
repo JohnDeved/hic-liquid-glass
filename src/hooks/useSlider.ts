@@ -1,8 +1,12 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useRef } from "react";
 import { useDrag } from "@use-gesture/react";
 import { rubberBandClamp, TR_SLIDER, TR_SLIDER_SMOOTH, TR_SLIDER_DRAG } from "../utils";
+import { useAnimatedNumber } from "./useAnimatedNumber";
 
 const TRACK_WIDTH = 330;
+
+const easeInOutCubic = (t: number) =>
+  t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
 
 export function useSlider() {
   const [value, setValue] = useState(10);
@@ -18,33 +22,39 @@ export function useSlider() {
     return ((clientX - rect.left) / rect.width) * 100;
   };
 
+  const clamp01 = (pct: number) => Math.max(0, Math.min(100, pct));
+
+  const handleFirst = (x: number) => {
+    if (releaseTimer.current) { clearTimeout(releaseTimer.current); releaseTimer.current = null; }
+    setPressed(true);
+    setMotionMode("smooth");
+    const pct = clamp01(pctFromClient(x));
+    setValue(Math.round(pct));
+    setRawPct(pct);
+  };
+
+  const handleMove = (x: number) => {
+    const pct = pctFromClient(x);
+    setRawPct(rubberBandClamp(pct, 0, 100, 8));
+    setValue(Math.round(clamp01(pct)));
+  };
+
+  const handleRelease = (x: number, moved: boolean) => {
+    setMotionMode("smooth");
+    setRawPct(clamp01(pctFromClient(x)));
+    if (moved) {
+      setPressed(false);
+    } else {
+      releaseTimer.current = setTimeout(() => { setPressed(false); releaseTimer.current = null; }, 400);
+    }
+  };
+
   const bind = useDrag(({ down, first, xy: [x], movement: [mx] }) => {
-    if (first) {
-      if (releaseTimer.current) { clearTimeout(releaseTimer.current); releaseTimer.current = null; }
-      setPressed(true);
-      setMotionMode("smooth");
-      const pct = Math.max(0, Math.min(100, pctFromClient(x)));
-      setValue(Math.round(pct));
-      setRawPct(pct);
-    }
-
-    if (!first && Math.abs(mx) >= 5) setMotionMode("instant");
-
-    if (!first && down) {
-      const pct = pctFromClient(x);
-      setRawPct(rubberBandClamp(pct, 0, 100, 8));
-      setValue(Math.round(Math.max(0, Math.min(100, pct))));
-    }
-
-    if (!down) {
-      setMotionMode("smooth");
-      setRawPct(Math.max(0, Math.min(100, pctFromClient(x))));
-      if (Math.abs(mx) >= 5) {
-        setPressed(false);
-      } else {
-        releaseTimer.current = setTimeout(() => { setPressed(false); releaseTimer.current = null; }, 400);
-      }
-    }
+    const moved = Math.abs(mx) >= 5;
+    if (first) handleFirst(x);
+    else if (moved) setMotionMode("instant");
+    if (down && !first) handleMove(x);
+    if (!down) handleRelease(x, moved);
   }, { pointer: { capture: true } });
 
   const dragging = motionMode === "instant";
@@ -56,44 +66,11 @@ export function useSlider() {
   const thumbBg = pressed ? "rgba(255,255,255,0.12)" : "#fff";
   const thumbShadow = pressed ? "0 5px 24px rgba(0,0,0,0.16)" : "0 3px 14px rgba(0,0,0,0.1)";
 
-  // Animate the fill width in JS rather than via a CSS transition: the HIC
-  // polyfill clones the DOM each frame without transition history, so a
-  // CSS-driven width snaps to its final value inside the glass texture
-  // while the surrounding live DOM still interpolates. JS-animating keeps
-  // the inline style itself in sync, so texture and DOM agree.
-  const targetFill = pressed ? rawPct : value;
-  const [fillPct, setFillPct] = useState(targetFill);
-  const fromRef = useRef(targetFill);
-  const rafRef = useRef(0);
-
-  useEffect(() => {
-    cancelAnimationFrame(rafRef.current);
-    if (dragging) {
-      // Track the live drag position so the post-release animation
-      // starts from the right place. Sync fillPct as well so the
-      // rendered width stays current.
-      fromRef.current = targetFill;
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setFillPct(targetFill);
-      return;
-    }
-    const from = fromRef.current;
-    const to = targetFill;
-    if (from === to) return;
-    const t0 = performance.now();
-    const dur = 350;
-    const ease = (t: number) =>
-      t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
-    const tick = () => {
-      const t = Math.min(1, (performance.now() - t0) / dur);
-      const v = from + (to - from) * ease(t);
-      fromRef.current = v;
-      setFillPct(v);
-      if (t < 1) rafRef.current = requestAnimationFrame(tick);
-    };
-    rafRef.current = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(rafRef.current);
-  }, [targetFill, dragging]);
+  const fillPct = useAnimatedNumber(pressed ? rawPct : value, {
+    duration: 350,
+    easing: easeInOutCubic,
+    instant: dragging,
+  });
 
   return {
     bind, wrapperRef, value, pressed, dragging,
