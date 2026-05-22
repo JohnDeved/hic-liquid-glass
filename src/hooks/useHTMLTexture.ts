@@ -20,9 +20,18 @@ import { getHtmlRenderer } from "three-html-render/polyfill";
  * Returns a stable THREE.CanvasTexture; the consumer feeds it to a
  * shader uniform (sceneTex) where it is sampled in screen-space UVs.
  */
+export interface RasterSubscription {
+  snapshot: () => void;
+  commit: () => void;
+}
+
 export function useHTMLTexture(
   elementRef: React.RefObject<HTMLElement | null>,
   enabled: boolean = true,
+  onRasterRef?: React.RefObject<{
+    start: () => void;
+    commit: () => void;
+  } | null>,
 ): THREE.Texture {
   const fallbackCanvas = useMemo(() => {
     const c = document.createElement("canvas");
@@ -66,7 +75,33 @@ export function useHTMLTexture(
 
     const markDirty = () => { dirtyRef.current = true; invalidate(); };
 
-    const subtreeObs = new MutationObserver(markDirty);
+    // A placeholder-only DOM change (the invisible GlassRect placeholder
+    // moving / scaling during drag) doesn't affect rasterized pixels, so
+    // we skip the expensive async raster. But subscribers still need to
+    // advance their geometry (canvas wrap position, mesh position) so
+    // the WebGL output follows the thumb. Fire a synchronous
+    // snapshot+commit pass for those — same shape as the raster
+    // lifecycle, just no texture upload.
+    const geomOnly = () => {
+      onRasterRef?.current?.start();
+      onRasterRef?.current?.commit();
+      invalidate();
+    };
+
+    const isPlaceholderTarget = (n: Node): boolean => {
+      const el = n.nodeType === 1 ? (n as Element) : n.parentElement;
+      return !!el?.closest("[data-glass-placeholder]");
+    };
+    const subtreeCallback = (records: MutationRecord[]) => {
+      let visibleChange = false;
+      for (const r of records) {
+        if (!isPlaceholderTarget(r.target)) { visibleChange = true; break; }
+      }
+      if (visibleChange) markDirty();
+      else geomOnly();
+    };
+
+    const subtreeObs = new MutationObserver(subtreeCallback);
     subtreeObs.observe(el, {
       attributes: true,
       childList: true,
@@ -85,15 +120,30 @@ export function useHTMLTexture(
 
     window.addEventListener("resize", markDirty);
 
-    let activeAnims = 0;
+    let visibleAnims = 0;
+    let placeholderAnims = 0;
     let loopRaf = 0;
     const loop = () => {
-      markDirty();
-      loopRaf = activeAnims > 0 ? requestAnimationFrame(loop) : 0;
+      // Visible transitions force a real raster; placeholder-only
+      // transitions (press scale on the invisible GlassRect) just need
+      // geometry to follow the scale, no re-raster needed.
+      if (visibleAnims > 0) markDirty();
+      else if (placeholderAnims > 0) geomOnly();
+      const active = visibleAnims > 0 || placeholderAnims > 0;
+      loopRaf = active ? requestAnimationFrame(loop) : 0;
     };
     const startLoop = () => { if (!loopRaf) loopRaf = requestAnimationFrame(loop); };
-    const onAnimStart = () => { activeAnims++; startLoop(); };
-    const onAnimEnd = () => { activeAnims = Math.max(0, activeAnims - 1); };
+    const isPlaceholderEventTarget = (e: Event) =>
+      e.target instanceof Element && e.target.closest("[data-glass-placeholder]");
+    const onAnimStart = (e: Event) => {
+      if (isPlaceholderEventTarget(e)) placeholderAnims++;
+      else visibleAnims++;
+      startLoop();
+    };
+    const onAnimEnd = (e: Event) => {
+      if (isPlaceholderEventTarget(e)) placeholderAnims = Math.max(0, placeholderAnims - 1);
+      else visibleAnims = Math.max(0, visibleAnims - 1);
+    };
 
     // Transition/animation events bubble, so a single listener at the
     // root of the captured subtree catches every descendant animation.
@@ -117,7 +167,7 @@ export function useHTMLTexture(
       el.removeEventListener("animationend", onAnimEnd);
       el.removeEventListener("animationcancel", onAnimEnd);
     };
-  }, [elementRef, invalidate]);
+  }, [elementRef, invalidate, onRasterRef]);
 
   useFrame(() => {
     if (!enabled || !dirtyRef.current || pendingRef.current) return;
@@ -126,6 +176,16 @@ export function useHTMLTexture(
 
     pendingRef.current = true;
     dirtyRef.current = false;
+    // Snapshot DOM-side state synchronously with the start of the async
+    // raster. The raster captures DOM at the moment update(el) reads the
+    // subtree; subscribers (CanvasRectUpdater, RegisteredGlass) capture
+    // their per-rect measurements at the same instant. When the raster
+    // completes we commit those snapshots together with the new texture,
+    // so the mesh, canvas wrap, and refracted content all advance as one
+    // atomic step. This eliminates the 1-frame skew that otherwise made
+    // the refracted background slide vs. the mesh during drag and "snap
+    // back" when motion paused.
+    onRasterRef?.current?.start();
     getHtmlRenderer()
       .update(el)
       .then((canvas) => {
@@ -135,16 +195,11 @@ export function useHTMLTexture(
         if (canvas !== currentCanvasRef.current || sizeChanged) {
           currentCanvasRef.current = canvas;
           lastSizeRef.current = { w: canvas.width, h: canvas.height };
-          // Dispose the GL-side texture so three reallocates storage at
-          // the new canvas dimensions on the next upload. Without this,
-          // three reuses the old GL texture and falls back to a
-          // subImage copy whose source overflows the destination,
-          // producing GL_INVALID_VALUE warnings.
           texture.dispose();
           texture.image = canvas;
         }
         texture.needsUpdate = true;
-        // The new texture must be drawn — schedule a render.
+        onRasterRef?.current?.commit();
         invalidate();
       })
       .catch(() => {

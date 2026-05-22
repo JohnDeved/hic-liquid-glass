@@ -79,6 +79,14 @@ function WebGLGlassPlaceholder({
   // a uniform, mirroring how CSS backdrop-filter composites bg-over-filter.
   const clippedStyle = { ...style, opacity: 0 };
 
-  return <div ref={elRef} className={className} style={clippedStyle} {...rest} />;
+  return (
+    <div
+      ref={elRef}
+      data-glass-placeholder="true"
+      className={className}
+      style={clippedStyle}
+      {...rest}
+    />
+  );
 }
 

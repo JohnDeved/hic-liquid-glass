@@ -10,10 +10,10 @@ import {
   type ReactNode,
   type RefObject,
 } from "react";
-import { Canvas, useFrame, useThree } from "@react-three/fiber";
+import { Canvas, useThree } from "@react-three/fiber";
 import { lip } from "@hashintel/refractive";
 import * as THREE from "three";
-import { useHTMLTexture } from "../hooks/useHTMLTexture";
+import { useHTMLTexture, type RasterSubscription } from "../hooks/useHTMLTexture";
 import { GlassThumb } from "./GlassThumb";
 
 /**
@@ -92,6 +92,20 @@ export function WebGLGlassOverlay({ stageRef, children }: WebGLGlassOverlayProps
   const [registrations, setRegistrations] = useState<Map<number, Registration>>(
     () => new Map(),
   );
+
+  // Frame-lock plumbing: every DOM measurement that feeds the WebGL
+  // output (canvas wrap rect + per-glass mesh position) registers a
+  // {snapshot, commit} pair here. `useHTMLTexture` calls `start()`
+  // synchronously before each async raster — that fans out to each
+  // subscriber's snapshot, capturing live DOM at the raster's instant.
+  // When the raster resolves, `commit()` fans out and each subscriber
+  // copies its snapshot into its active carrier. The mesh, wrap, and
+  // texture then advance together, eliminating drag-time skew.
+  const rasterSubsRef = useRef<Set<RasterSubscription>>(new Set());
+  const onRasterRef = useRef({
+    start: () => { for (const s of rasterSubsRef.current) s.snapshot(); },
+    commit: () => { for (const s of rasterSubsRef.current) s.commit(); },
+  });
 
   const register = useCallback(
     (el: HTMLElement, refraction: GlassRefractionParams) => {
@@ -174,11 +188,14 @@ export function WebGLGlassOverlay({ stageRef, children }: WebGLGlassOverlayProps
                 overlayRef={overlayRef}
                 canvasWrapRef={canvasWrapRef}
                 canvasRectRef={canvasRectRef}
+                rasterSubsRef={rasterSubsRef}
               />
               <GlassScene
                 stageRef={stageRef}
                 canvasRectRef={canvasRectRef}
                 items={items}
+                onRasterRef={onRasterRef}
+                rasterSubsRef={rasterSubsRef}
               />
             </Canvas>
           </div>
@@ -306,6 +323,7 @@ interface CanvasRectUpdaterProps {
   overlayRef: RefObject<HTMLDivElement | null>;
   canvasWrapRef: RefObject<HTMLDivElement | null>;
   canvasRectRef: RefObject<{ x: number; y: number; w: number; h: number }>;
+  rasterSubsRef: RefObject<Set<RasterSubscription>>;
 }
 
 /** Padding (CSS px) around the placeholder union rect, to absorb sub-pixel
@@ -313,85 +331,111 @@ interface CanvasRectUpdaterProps {
 const CANVAS_PADDING = 16;
 
 /**
- * Inside-Canvas counterpart that runs every R3F frame to:
- *  1. measure the placeholder union rect,
- *  2. apply the rect to the wrap div (transform + size),
- *  3. store it in `canvasRectRef` for `RegisteredGlass` to read in the
- *     SAME frame.
- *
- * Doing this in `useFrame` (rather than a separate DOM-side rAF loop) is
- * essential: it keeps the wrap's CSS transform and the shader's
- * `canvasCenter` uniform in lockstep. A previous DOM-side tracker raced
- * with R3F's render and produced a 1-frame skew that looked like jitter
- * during slider drags.
+ * Measures the placeholder union rect and applies it to the canvas wrap
+ * (transform + size). Driven by the raster lifecycle (not useFrame) so
+ * the wrap moves in lockstep with the texture: snapshot during raster
+ * start, commit to DOM when the new texture arrives. The wrap therefore
+ * never sits at a position that contradicts the texture, which used to
+ * surface as drag-time skew between the mesh and the refracted content.
  */
 function CanvasRectUpdater({
   items,
   overlayRef,
   canvasWrapRef,
   canvasRectRef,
+  rasterSubsRef,
 }: CanvasRectUpdaterProps) {
   const lastRef = useRef({ x: NaN, y: NaN, w: -1, h: -1 });
+  const pendingRef = useRef({ x: 0, y: 0, w: 1, h: 1, valid: false });
+  const itemsRef = useRef(items);
+  useEffect(() => { itemsRef.current = items; }, [items]);
 
-  useFrame(() => {
-    const overlay = overlayRef.current;
-    const wrap = canvasWrapRef.current;
-    if (!overlay || !wrap || items.length === 0) return;
+  useEffect(() => {
+    const measure = () => {
+      const overlay = overlayRef.current;
+      const wrap = canvasWrapRef.current;
+      const list = itemsRef.current;
+      if (!overlay || !wrap || list.length === 0) return null;
 
-    const ovRect = overlay.getBoundingClientRect();
-    let minX = Infinity;
-    let minY = Infinity;
-    let maxX = -Infinity;
-    let maxY = -Infinity;
-    for (const r of items) {
-      const el = r.el;
-      const er = el.getBoundingClientRect();
-      const cx = er.left + er.width / 2;
-      const cy = er.top + er.height / 2;
-      // Layout size keeps the canvas stable while the thumb scales.
-      const lw = el.offsetWidth || er.width;
-      const lh = el.offsetHeight || er.height;
-      minX = Math.min(minX, cx - lw / 2);
-      minY = Math.min(minY, cy - lh / 2);
-      maxX = Math.max(maxX, cx + lw / 2);
-      maxY = Math.max(maxY, cy + lh / 2);
-    }
-    if (!isFinite(minX)) return;
+      const ovRect = overlay.getBoundingClientRect();
+      let minX = Infinity;
+      let minY = Infinity;
+      let maxX = -Infinity;
+      let maxY = -Infinity;
+      for (const r of list) {
+        const el = r.el;
+        const er = el.getBoundingClientRect();
+        const cx = er.left + er.width / 2;
+        const cy = er.top + er.height / 2;
+        const lw = el.offsetWidth || er.width;
+        const lh = el.offsetHeight || er.height;
+        minX = Math.min(minX, cx - lw / 2);
+        minY = Math.min(minY, cy - lh / 2);
+        maxX = Math.max(maxX, cx + lw / 2);
+        maxY = Math.max(maxY, cy + lh / 2);
+      }
+      if (!isFinite(minX)) return null;
+      return {
+        x: minX - CANVAS_PADDING - ovRect.left,
+        y: minY - CANVAS_PADDING - ovRect.top,
+        w: Math.ceil(maxX - minX + CANVAS_PADDING * 2),
+        h: Math.ceil(maxY - minY + CANVAS_PADDING * 2),
+      };
+    };
 
-    const x = minX - CANVAS_PADDING - ovRect.left;
-    const y = minY - CANVAS_PADDING - ovRect.top;
-    const w = Math.ceil(maxX - minX + CANVAS_PADDING * 2);
-    const h = Math.ceil(maxY - minY + CANVAS_PADDING * 2);
+    const sub: RasterSubscription = {
+      snapshot: () => {
+        const m = measure();
+        if (!m) return;
+        pendingRef.current.x = m.x;
+        pendingRef.current.y = m.y;
+        pendingRef.current.w = m.w;
+        pendingRef.current.h = m.h;
+        pendingRef.current.valid = true;
+      },
+      commit: () => {
+        const p = pendingRef.current;
+        const wrap = canvasWrapRef.current;
+        if (!p.valid || !wrap) return;
 
-    // Snap the wrap to integer pixels so the GPU compositor doesn't
-    // sub-pixel-filter the canvas backbuffer. The fractional remainder
-    // is absorbed by the mesh position in RegisteredGlass (which reads
-    // canvasRectRef and subtracts from glassCenter), so the final
-    // on-screen glass position remains exact. We MUST store the same
-    // int values in the ref that we apply to the wrap transform —
-    // otherwise the shader's canvasCenter and the wrap's actual
-    // position disagree and the mesh visibly shifts.
-    const intX = Math.round(x);
-    const intY = Math.round(y);
+        // Snap to integer pixels: the GPU compositor would otherwise
+        // sub-pixel-filter the canvas backbuffer between frames. The
+        // fractional remainder lives in the mesh position (computed in
+        // RegisteredGlass relative to this integer canvas center), and
+        // is rendered sub-pixel inside the backbuffer by the shader.
+        const intX = Math.round(p.x);
+        const intY = Math.round(p.y);
 
-    canvasRectRef.current.x = intX;
-    canvasRectRef.current.y = intY;
-    canvasRectRef.current.w = w;
-    canvasRectRef.current.h = h;
+        canvasRectRef.current.x = intX;
+        canvasRectRef.current.y = intY;
+        canvasRectRef.current.w = p.w;
+        canvasRectRef.current.h = p.h;
 
-    const last = lastRef.current;
-    if (w !== last.w || h !== last.h) {
-      wrap.style.width = `${w}px`;
-      wrap.style.height = `${h}px`;
-      last.w = w;
-      last.h = h;
-    }
-    if (intX !== last.x || intY !== last.y) {
-      wrap.style.transform = `translate(${intX}px, ${intY}px)`;
-      last.x = intX;
-      last.y = intY;
-    }
-  });
+        const last = lastRef.current;
+        if (p.w !== last.w || p.h !== last.h) {
+          wrap.style.width = `${p.w}px`;
+          wrap.style.height = `${p.h}px`;
+          last.w = p.w;
+          last.h = p.h;
+        }
+        if (intX !== last.x || intY !== last.y) {
+          wrap.style.transform = `translate(${intX}px, ${intY}px)`;
+          last.x = intX;
+          last.y = intY;
+        }
+      },
+    };
+
+    // Initial snapshot + commit so the wrap has a valid position before
+    // the first raster completes. Without this the canvas sits at its
+    // default 1×1 / (0,0) for one frame after mount.
+    sub.snapshot();
+    sub.commit();
+
+    rasterSubsRef.current.add(sub);
+    const subs = rasterSubsRef.current;
+    return () => { subs.delete(sub); };
+  }, [overlayRef, canvasWrapRef, canvasRectRef, rasterSubsRef]);
 
   return null;
 }
@@ -400,10 +444,12 @@ interface GlassSceneProps {
   stageRef: RefObject<HTMLElement | null>;
   canvasRectRef: RefObject<{ x: number; y: number; w: number; h: number }>;
   items: Registration[];
+  onRasterRef: RefObject<{ start: () => void; commit: () => void } | null>;
+  rasterSubsRef: RefObject<Set<RasterSubscription>>;
 }
 
-function GlassScene({ stageRef, canvasRectRef, items }: GlassSceneProps) {
-  const sceneTex = useHTMLTexture(stageRef);
+function GlassScene({ stageRef, canvasRectRef, items, onRasterRef, rasterSubsRef }: GlassSceneProps) {
+  const sceneTex = useHTMLTexture(stageRef, true, onRasterRef);
   return (
     <>
       {items.map((r) => (
@@ -413,6 +459,7 @@ function GlassScene({ stageRef, canvasRectRef, items }: GlassSceneProps) {
           stageRef={stageRef}
           canvasRectRef={canvasRectRef}
           sceneTex={sceneTex}
+          rasterSubsRef={rasterSubsRef}
         />
       ))}
     </>
@@ -424,15 +471,16 @@ interface RegisteredGlassProps {
   stageRef: RefObject<HTMLElement | null>;
   canvasRectRef: RefObject<{ x: number; y: number; w: number; h: number }>;
   sceneTex: THREE.Texture;
+  rasterSubsRef: RefObject<Set<RasterSubscription>>;
 }
 
 /**
- * Wraps a single `<GlassThumb>` that tracks a placeholder DOM element by
- * measuring its layout + bounding rect each frame. The placeholder's
- * pre-transform layout size (offsetWidth/Height) gives us the glass size;
- * the post-transform bounding rect gives us position + scale.
+ * Wraps a single `<GlassThumb>` for a placeholder DOM element. Measurements
+ * (position, scale, size, bg-color) are captured during the raster snapshot
+ * phase and applied to the mesh carriers during commit, so the mesh always
+ * matches the texture content frame-for-frame.
  */
-function RegisteredGlass({ reg, stageRef, canvasRectRef, sceneTex }: RegisteredGlassProps) {
+function RegisteredGlass({ reg, stageRef, canvasRectRef, sceneTex, rasterSubsRef }: RegisteredGlassProps) {
   const [size, setSize] = useState({ w: 1, h: 1 });
   const positionRef = useRef<[number, number, number]>([0, 0, 0]);
   const scaleRef = useRef<{ v: number }>({ v: 1 });
@@ -440,50 +488,82 @@ function RegisteredGlass({ reg, stageRef, canvasRectRef, sceneTex }: RegisteredG
   const stageSizeRef = useRef({ x: 1, y: 1 });
   const canvasCenterRef = useRef({ x: 0, y: 0 });
 
-  useFrame(() => {
-    const el = reg.el;
-    const stage = stageRef.current;
-    const canvasRect = canvasRectRef.current;
-    if (!el || !stage || !canvasRect) return;
-
-    const layoutW = el.offsetWidth;
-    const layoutH = el.offsetHeight;
-    if (layoutW <= 0 || layoutH <= 0) return;
-
-    const elRect = el.getBoundingClientRect();
-    const stageRect = stage.getBoundingClientRect();
-
-    // Glass center in stage CSS px (TL origin, y-down).
-    const glassCenterStageX = elRect.left + elRect.width / 2 - stageRect.left;
-    const glassCenterStageY = elRect.top + elRect.height / 2 - stageRect.top;
-
-    // Canvas center in stage CSS px = canvas TL within stage + canvas/2.
-    // canvasRectRef.x/y are canvas TL within overlay; overlay is laid out
-    // 1:1 with stage so we can use them directly as stage offsets.
-    const canvasCenterStageX = canvasRect.x + canvasRect.w / 2;
-    const canvasCenterStageY = canvasRect.y + canvasRect.h / 2;
-    canvasCenterRef.current.x = canvasCenterStageX;
-    canvasCenterRef.current.y = canvasCenterStageY;
-
-    stageSizeRef.current.x = stageRect.width;
-    stageSizeRef.current.y = stageRect.height;
-
-    // Mesh position relative to canvas center, in world coords (y-up).
-    const pos = positionRef.current;
-    pos[0] = glassCenterStageX - canvasCenterStageX;
-    pos[1] = canvasCenterStageY - glassCenterStageY;
-
-    scaleRef.current.v = elRect.width / layoutW;
-
-    // Read the placeholder's computed background color and feed it to the
-    // shader as the bg-overlay color. The placeholder itself is opacity:0,
-    // so this is the only way its bg-color reaches the rendered output.
-    parseCssColor(getComputedStyle(el).backgroundColor, bgColorRef.current);
-
-    if (layoutW !== size.w || layoutH !== size.h) {
-      setSize({ w: layoutW, h: layoutH });
-    }
+  const pendingRef = useRef({
+    layoutW: 1,
+    layoutH: 1,
+    glassCenterStageX: 0,
+    glassCenterStageY: 0,
+    stageW: 1,
+    stageH: 1,
+    scale: 1,
+    bg: { r: 1, g: 1, b: 1, a: 1 },
+    valid: false,
   });
+
+  useEffect(() => {
+    const measure = () => {
+      const el = reg.el;
+      const stage = stageRef.current;
+      if (!el || !stage) return null;
+      const layoutW = el.offsetWidth;
+      const layoutH = el.offsetHeight;
+      if (layoutW <= 0 || layoutH <= 0) return null;
+      const elRect = el.getBoundingClientRect();
+      const stageRect = stage.getBoundingClientRect();
+      const p = pendingRef.current;
+      p.layoutW = layoutW;
+      p.layoutH = layoutH;
+      p.glassCenterStageX = elRect.left + elRect.width / 2 - stageRect.left;
+      p.glassCenterStageY = elRect.top + elRect.height / 2 - stageRect.top;
+      p.stageW = stageRect.width;
+      p.stageH = stageRect.height;
+      p.scale = elRect.width / layoutW;
+      parseCssColor(getComputedStyle(el).backgroundColor, p.bg);
+      p.valid = true;
+      return p;
+    };
+
+    const sub: RasterSubscription = {
+      snapshot: () => { measure(); },
+      commit: () => {
+        const p = pendingRef.current;
+        const canvasRect = canvasRectRef.current;
+        if (!p.valid || !canvasRect) return;
+
+        const canvasCenterStageX = canvasRect.x + canvasRect.w / 2;
+        const canvasCenterStageY = canvasRect.y + canvasRect.h / 2;
+        canvasCenterRef.current.x = canvasCenterStageX;
+        canvasCenterRef.current.y = canvasCenterStageY;
+
+        stageSizeRef.current.x = p.stageW;
+        stageSizeRef.current.y = p.stageH;
+
+        const pos = positionRef.current;
+        pos[0] = p.glassCenterStageX - canvasCenterStageX;
+        pos[1] = canvasCenterStageY - p.glassCenterStageY;
+
+        scaleRef.current.v = p.scale;
+
+        bgColorRef.current.r = p.bg.r;
+        bgColorRef.current.g = p.bg.g;
+        bgColorRef.current.b = p.bg.b;
+        bgColorRef.current.a = p.bg.a;
+
+        if (p.layoutW !== size.w || p.layoutH !== size.h) {
+          setSize({ w: p.layoutW, h: p.layoutH });
+        }
+      },
+    };
+
+    // Initial snapshot + commit so the mesh has valid position/size on
+    // its first render.
+    sub.snapshot();
+    sub.commit();
+
+    rasterSubsRef.current.add(sub);
+    const subs = rasterSubsRef.current;
+    return () => { subs.delete(sub); };
+  }, [reg.el, stageRef, canvasRectRef, rasterSubsRef, size.w, size.h]);
 
   // bezelHeightFn reference → shader enum. Default to lip (0).
   const bezelType = reg.refraction.bezelHeightFn === lip ? 0 : 1;
