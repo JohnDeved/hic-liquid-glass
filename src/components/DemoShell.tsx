@@ -1,7 +1,5 @@
-import { useRef, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import clsx from "clsx";
-import { useGlassBackend } from "./GlassBackend";
-import { WebGLGlassOverlay } from "./WebGLGlassOverlay";
 import { useTheme } from "../themeContext";
 
 const OUTER =
@@ -22,10 +20,9 @@ interface DemoShellProps {
 
 /**
  * Shared layout for every demo. Renders a chrome container with a bg-styled
- * stage. In webgl mode, also mounts a `<WebGLGlassOverlay>` sibling of the
- * stage that paints `<GlassRect>` placeholders via Three.js + GLSL.
- *
- * The demo body (children) is identical regardless of backend.
+ * stage. The demo body (children) is identical regardless of backend; the
+ * stage carries `data-glass-stage` so any `<DisplacementGlass>` inside can
+ * walk up to find its capture root.
  */
 export function DemoShell({
   title,
@@ -35,29 +32,19 @@ export function DemoShell({
   children,
 }: DemoShellProps) {
   const [useImage, setUseImage] = useState(false);
-  const stageRef = useRef<HTMLDivElement>(null);
-  const backend = useGlassBackend();
   const { theme } = useTheme();
-
-  const stage = (
-    <div
-      ref={stageRef}
-      className={clsx(STAGE, "demo-grid-bg", useImage && "demo-image-bg")}
-    >
-      {children(useImage)}
-    </div>
-  );
 
   return (
     <div className="grid grid-rows-subgrid row-span-4">
       <h2 className="text-lg font-semibold mb-1.5">{title}</h2>
       <p className="text-[0.82rem] opacity-55 mb-3 leading-relaxed">{description}</p>
       <div className={clsx(OUTER, theme === "dark" && "dark", touchNone && "touch-none")}>
-        {backend === "webgl" ? (
-          <WebGLGlassOverlay stageRef={stageRef}>{stage}</WebGLGlassOverlay>
-        ) : (
-          stage
-        )}
+        <div
+          data-glass-stage="true"
+          className={clsx(STAGE, "demo-grid-bg", useImage && "demo-image-bg")}
+        >
+          {children(useImage)}
+        </div>
         <label className={CHECK}>
           <input
             type="checkbox"

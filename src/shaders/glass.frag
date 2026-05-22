@@ -178,7 +178,9 @@ void main() {
     int rad = int(min(ceil(sigma * 2.5), 12.0));
     for (int y = -12; y <= 12; y++) {
       for (int x = -12; x <= 12; x++) {
-        if (abs(x) > rad || abs(y) > rad) continue;
+        int ax = x < 0 ? -x : x;
+        int ay = y < 0 ? -y : y;
+        if (ax > rad || ay > rad) continue;
         float w = exp(-float(x * x + y * y) / (2.0 * sigma * sigma));
         vec2 off = vec2(float(x), float(y)) / stageSize;
         sceneColor += texture2D(sceneTex, displacedUV + off) * w;
