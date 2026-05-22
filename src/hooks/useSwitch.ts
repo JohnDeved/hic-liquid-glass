@@ -55,10 +55,12 @@ export function useSwitch() {
   }, [])
   useReleaseOnInterrupt(pressed, forceRelease, wrapperRef)
 
-  const displayX = pressed ? thumbX : active ? MAX_X : 0
+  const restingX = active ? MAX_X : 0
+  const displayX = pressed ? thumbX : restingX
   const ratio = Math.max(0, Math.min(1, displayX / MAX_X))
 
-  const targetRatio = pressed ? ratio : active ? 1 : 0
+  const restingRatio = active ? 1 : 0
+  const targetRatio = pressed ? ratio : restingRatio
   const animRatio = useAnimatedNumber(targetRatio, { duration: 250, instant: pressed })
 
   const [r, g, b, a] = TRACK_RGBA.off.map((v, i) => v + (TRACK_RGBA.on[i] - v) * animRatio)

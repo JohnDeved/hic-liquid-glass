@@ -13,7 +13,10 @@ export function Params({ params, set }: Props) {
       </div>
       {PARAM_CONFIG.map(({ key, label, min, max, step }) => {
         const v = params[key]
-        const display = step < 1 ? v.toFixed(2) : step < 10 ? v.toFixed(1) : String(v)
+        let digits = 0
+        if (step < 1) digits = 2
+        else if (step < 10) digits = 1
+        const display = digits === 0 ? String(v) : v.toFixed(digits)
         return (
           <div key={key} className="flex items-center gap-4">
             <label className="w-56 uppercase tracking-[0.08em] text-[11px] opacity-80 select-none leading-tight shrink-0">

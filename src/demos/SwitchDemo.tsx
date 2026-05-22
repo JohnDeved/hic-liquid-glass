@@ -11,8 +11,8 @@ const SWITCH_DESC =
 export function SwitchDemo() {
   const sw = useSwitch()
   const rp = useRefractionParams({ specular: 0.5, refraction: 1, blur: 0.2 })
-
   return (
+    // oxlint-disable-next-line react-perf/jsx-no-jsx-as-prop -- params re-render is intentional
     <DemoShell title="Switch" description={SWITCH_DESC} touchNone params={<Params {...rp} />}>
       {() => (
         <div

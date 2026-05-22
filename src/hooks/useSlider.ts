@@ -78,7 +78,8 @@ export function useSlider() {
 
   const dragging = motionMode === 'instant'
   const thumbLeft = ((pressed ? rawPct : value) / 100) * TRACK_WIDTH
-  const thumbTransition = pressed ? (dragging ? TR_SLIDER_DRAG : TR_SLIDER_SMOOTH) : TR_SLIDER
+  const pressedTransition = dragging ? TR_SLIDER_DRAG : TR_SLIDER_SMOOTH
+  const thumbTransition = pressed ? pressedTransition : TR_SLIDER
   const thumbScale = pressed ? 0.9 : 0.6
   const thumbBg = pressed ? 'rgba(255,255,255,0.12)' : '#fff'
   const thumbShadow = pressed ? '0 5px 24px rgba(0,0,0,0.16)' : '0 3px 14px rgba(0,0,0,0.1)'
