@@ -16,10 +16,10 @@ Chromium-only via pure CSS.
 Each demo (Switch, Slider) is rendered twice, with the same draggable, springy
 interaction, so you can compare the two backends pixel-for-pixel:
 
-| Backend                            | Tech                                                              | Browser support  |
-| ---------------------------------- | ----------------------------------------------------------------- | ---------------- |
-| **WebGL + GLSL**                   | HTML-in-Canvas raster + custom fragment shader (Snell's law port) | All modern       |
-| **`@hashintel/refractive`** (CSS)  | SVG displacement filter feeding `backdrop-filter`                 | Chromium only    |
+| Backend                           | Tech                                                              | Browser support |
+| --------------------------------- | ----------------------------------------------------------------- | --------------- |
+| **WebGL + GLSL**                  | HTML-in-Canvas raster + custom fragment shader (Snell's law port) | All modern      |
+| **`@hashintel/refractive`** (CSS) | SVG displacement filter feeding `backdrop-filter`                 | Chromium only   |
 
 The WebGL path uses [`three-html-render`][thr]'s polyfill so the texture
 capture works everywhere — native `drawElement()` where available, an
@@ -47,12 +47,12 @@ npm install
 npm run dev
 ```
 
-| Script            | What it does                                  |
-| ----------------- | --------------------------------------------- |
-| `npm run dev`     | Vite dev server with HMR                      |
-| `npm run build`   | `tsc -b && vite build`                        |
-| `npm run preview` | Serve the production build                    |
-| `npm run lint`    | `oxlint --fix .` followed by `oxfmt .`        |
+| Script            | What it does                           |
+| ----------------- | -------------------------------------- |
+| `npm run dev`     | Vite dev server with HMR               |
+| `npm run build`   | `tsc -b && vite build`                 |
+| `npm run preview` | Serve the production build             |
+| `npm run lint`    | `oxlint --fix .` followed by `oxfmt .` |
 
 ## Layout
 

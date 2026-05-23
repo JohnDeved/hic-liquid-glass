@@ -24,7 +24,8 @@ export function SwitchDemo() {
           <GlassRect
             className="absolute top-[33.5px] left-0 w-[146px] h-[92px] ml-[-21.95px] pointer-events-none"
             style={{
-              transform: `translateX(${sw.displayX}px) translateY(-50%) scale(${sw.thumbScale})`,
+              translate: `${sw.displayX}px -50%`,
+              scale: `${sw.thumbScale}`,
               backgroundColor: sw.thumbBg,
               boxShadow: sw.thumbShadow,
               transition: sw.thumbTransition,

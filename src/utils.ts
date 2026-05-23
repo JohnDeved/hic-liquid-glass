@@ -53,9 +53,9 @@ export const TRACK_RGBA = { off: [140, 140, 148, 0.5], on: [59, 191, 78, 0.93] }
 /* ─── Transitions ─── */
 
 export const TR_SWITCH =
-  'transform 0.35s cubic-bezier(0.4,0,0.2,1), background-color 0.25s ease, box-shadow 0.25s ease'
+  'translate 0.35s cubic-bezier(0.4,0,0.2,1), scale 0.25s ease, background-color 0.25s ease, box-shadow 0.25s ease'
 export const TR_SWITCH_PRESS =
-  'transform 0.08s ease-out, background-color 0.2s ease, box-shadow 0.2s ease'
+  'translate 0s, scale 0.08s ease-out, background-color 0.2s ease, box-shadow 0.2s ease'
 export const TR_SLIDER =
   'transform 0.2s ease, left 0.35s cubic-bezier(0.4,0,0.2,1), background-color 0.25s ease, box-shadow 0.25s ease'
 export const TR_SLIDER_SMOOTH =
