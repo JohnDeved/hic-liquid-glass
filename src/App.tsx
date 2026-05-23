@@ -95,9 +95,11 @@ export default function App() {
           </div>
 
           {[SwitchDemo, SliderDemo].flatMap(Demo =>
-            BACKENDS.map(backend => (
+            BACKENDS.map((backend, i) => (
               <GlassBackendProvider key={`${Demo.name}-${backend}`} value={backend}>
-                <Demo />
+                <div className={i > 0 ? 'is-secondary contents' : 'contents'}>
+                  <Demo />
+                </div>
               </GlassBackendProvider>
             ))
           )}
