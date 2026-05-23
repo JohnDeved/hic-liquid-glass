@@ -18,11 +18,11 @@ export function Params({ params, set }: Props) {
         else if (step < 10) digits = 1
         const display = digits === 0 ? String(v) : v.toFixed(digits)
         return (
-          <div key={key} className="flex items-center gap-4">
-            <label className="w-56 uppercase tracking-[0.08em] text-[11px] opacity-80 select-none leading-tight shrink-0">
+          <div key={key} className="flex items-center gap-3 sm:gap-4">
+            <label className="w-32 sm:w-56 uppercase tracking-[0.08em] text-[11px] opacity-80 select-none leading-tight shrink-0">
               {label}
             </label>
-            <span className="w-14 text-right font-mono tabular-nums text-[11px] text-[var(--text-60)] shrink-0">
+            <span className="w-12 sm:w-14 text-right font-mono tabular-nums text-[11px] text-[var(--text-60)] shrink-0">
               {display}
             </span>
             <input
@@ -32,7 +32,7 @@ export function Params({ params, set }: Props) {
               step={step}
               value={v}
               onChange={e => set(key)(Number(e.target.value))}
-              className="flex-1"
+              className="flex-1 min-w-0"
               aria-label={label}
             />
           </div>

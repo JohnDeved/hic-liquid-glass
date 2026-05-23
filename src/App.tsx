@@ -17,7 +17,7 @@ function ThemeToggle() {
       onClick={toggle}
       aria-label="Toggle color theme"
       title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
-      className="fixed top-5 right-5 z-50 inline-flex items-center justify-center w-11 h-11 rounded-full border border-[var(--ui-border)] bg-[var(--bg1)] shadow-lg hover:scale-105 active:scale-95 transition-transform text-xl"
+      className="fixed top-3 right-3 lg:top-5 lg:right-5 z-50 inline-flex items-center justify-center w-10 h-10 lg:w-11 lg:h-11 rounded-full border border-[var(--ui-border)] bg-[var(--bg1)] shadow-lg hover:scale-105 active:scale-95 transition-transform text-xl"
     >
       {theme === 'dark' ? '☀️' : '🌙'}
     </button>
@@ -29,8 +29,8 @@ export default function App() {
     <ThemeProvider>
       <div className="min-h-screen bg-[var(--bg2)] text-[var(--c-text)] font-sans relative">
         <ThemeToggle />
-        <header className="text-center pt-12 px-6 pb-3">
-          <h1 className="text-[2rem] font-bold mb-2">Liquid Glass Components</h1>
+        <header className="text-center pt-10 lg:pt-12 px-4 lg:px-6 pb-3">
+          <h1 className="text-2xl lg:text-[2rem] font-bold mb-2">Liquid Glass Components</h1>
           <p className="text-sm opacity-60 mb-3">
             WWDC 2025 Liquid Glass, recreated in the browser. Inspired by{' '}
             <a
@@ -44,7 +44,7 @@ export default function App() {
             .
           </p>
         </header>
-        <main className="grid grid-cols-2 gap-x-8 gap-y-4 max-w-[1400px] mx-auto px-6 pb-16 relative before:content-[''] before:absolute before:top-0 before:bottom-0 before:left-1/2 before:w-px before:bg-[var(--ui-border)]">
+        <main className="grid grid-cols-1 lg:grid-cols-2 gap-x-8 gap-y-4 max-w-[1400px] mx-auto px-4 lg:px-6 pb-16 relative lg:before:content-[''] lg:before:absolute lg:before:top-0 lg:before:bottom-0 lg:before:left-1/2 lg:before:w-px lg:before:bg-[var(--ui-border)]">
           <div className="mb-6">
             <div className="text-[0.8rem] font-semibold uppercase tracking-[0.08em] opacity-50">
               WebGL + GLSL · via{' '}

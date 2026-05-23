@@ -23,7 +23,7 @@ export function DemoShell({ title, description, params, touchNone, children }: D
       <p className="text-[0.82rem] opacity-55 mb-3 leading-relaxed">{description}</p>
       <div
         className={clsx(
-          'h-96 rounded-xl border border-[var(--ui-border)] relative overflow-hidden',
+          'h-72 sm:h-96 rounded-xl border border-[var(--ui-border)] relative overflow-hidden',
           theme === 'dark' && 'dark',
           touchNone && 'touch-none'
         )}
@@ -32,7 +32,8 @@ export function DemoShell({ title, description, params, touchNone, children }: D
           data-glass-stage="true"
           className={clsx(
             'absolute inset-0 flex flex-col items-center justify-center demo-grid-bg',
-            useImage && 'demo-image-bg'
+            useImage && 'demo-image-bg',
+            '[&>*]:scale-[0.85] sm:[&>*]:scale-100 [&>*]:origin-center'
           )}
         >
           {children(useImage)}
