@@ -1,5 +1,7 @@
 # hic-liquid-glass
 
+![Liquid Glass switch demo](./public/hero.gif)
+
 Apple-style **Liquid Glass** UI components, recreated in the browser on top of
 the new [**HTML-in-Canvas (HIC)**][hic] API.
 
