@@ -273,7 +273,6 @@ export function DisplacementGlass({ refraction, className, style, ...rest }: Pro
       style={{
         ...style,
         borderRadius: refraction.radius,
-        boxShadow: `0 0 ${12 + 24 * (refraction.dispersion ?? 0)}px rgba(255, 255, 255, ${0.05 + 0.12 * (refraction.dispersion ?? 0)})`,
       }}
       data-displacement-glass="true"
       {...rest}

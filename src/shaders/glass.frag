@@ -218,15 +218,11 @@ void main() {
   // so it doesn't contaminate the HIC capture — bgColor here IS its bg.
   sceneColor.rgb = mix(sceneColor.rgb, bgColor.rgb, bgColor.a);
 
-  // Apple-style rim highlights: continuous bright band around the whole
-  // perimeter (outer rim), plus a fainter secondary band a bit deeper
-  // inside (inner rim). Both are independent of the angle-biased specular
-  // and use the existing specularOpacity to stay user-controllable.
+  // Apple-style outer rim highlight: a single continuous bright band hugging
+  // the perimeter. Uses specularOpacity to stay user-controllable.
   vec3 rimTint = vec3(0.88, 0.97, 1.0); // slight cool/cyan cast
   float outerRim = exp(-pow((distToBorder - 1.2) / 1.4, 2.0));
-  float innerRimDist = bw * 0.75;
-  float innerRim = exp(-pow((distToBorder - innerRimDist) / max(1.0, bw * 0.18), 2.0));
-  float rimAlpha = (outerRim * 0.85 + innerRim * 0.35) * specularOpacity;
+  float rimAlpha = outerRim * 0.6 * specularOpacity;
   sceneColor.rgb = mix(sceneColor.rgb, rimTint, rimAlpha);
 
   // Add specular highlight (white overlay)
