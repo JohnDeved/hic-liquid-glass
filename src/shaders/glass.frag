@@ -12,6 +12,7 @@ uniform float glassThickness;  // virtual glass thickness (refraction strength)
 uniform float ior;             // index of refraction (default 1.5)
 uniform float blurAmount;      // gaussian blur std-deviation in pixels
 uniform float specularOpacity; // strength of the specular highlight
+uniform float dispersion;      // edge chromatic + edge blur boost intensity (0..1)
 uniform int bezelType;         // 0 = lip, 1 = convex, 2 = concave, 3 = convexCircle
 uniform vec4 bgColor;          // pill's own bg color, composited OVER refraction (matches backdrop-filter)
 
@@ -123,11 +124,13 @@ void main() {
   // Compute displacement in the bezel zone
   vec2 displacement = vec2(0.0);
   float specularValue = 0.0;
+  float edgeFactor = 0.0; // 0 in flat center, 1 at the bezel rim
 
   float bw = min(bezelWidth, min(halfSize.x, halfSize.y));
 
   if (distToBorder < bw && bw > 0.5) {
     float normalizedDist = distToBorder / bw; // 0 at border → 1 inside
+    edgeFactor = 1.0 - normalizedDist;
 
     // Bezel height and derivative
     float h = bezelHeight(normalizedDist);
@@ -169,12 +172,20 @@ void main() {
   vec2 displacedUV = sceneUV + displacement / stageSize;
   displacedUV = clamp(displacedUV, vec2(0.001), vec2(0.999));
 
-  // Gaussian blur (only when blurAmount > threshold)
+  // Chromatic aberration: split R/B sampling along the displacement vector,
+  // strongest at the bezel rim, zero in the flat center. Scaled by dispersion.
+  vec2 aberrOffset = (displacement / stageSize) * (0.16 * dispersion * edgeFactor);
+
+  // Edge-amplified blur: boost sigma toward the rim where the glass is
+  // thickest, mimicking the softer fall-off in Apple's Liquid Glass.
+  float effSigma = blurAmount * (1.0 + 3.0 * dispersion * edgeFactor);
+
+  // Gaussian blur (only when effective sigma > threshold)
   vec4 sceneColor;
-  if (blurAmount > 0.5) {
+  if (effSigma > 0.5) {
     sceneColor = vec4(0.0);
     float total = 0.0;
-    float sigma = blurAmount;
+    float sigma = effSigma;
     int rad = int(min(ceil(sigma * 2.5), 12.0));
     for (int y = -12; y <= 12; y++) {
       for (int x = -12; x <= 12; x++) {
@@ -183,13 +194,21 @@ void main() {
         if (ax > rad || ay > rad) continue;
         float w = exp(-float(x * x + y * y) / (2.0 * sigma * sigma));
         vec2 off = vec2(float(x), float(y)) / stageSize;
-        sceneColor += texture2D(sceneTex, displacedUV + off) * w;
+        float r = texture2D(sceneTex, displacedUV + off + aberrOffset).r;
+        float g = texture2D(sceneTex, displacedUV + off).g;
+        float b = texture2D(sceneTex, displacedUV + off - aberrOffset).b;
+        float a = texture2D(sceneTex, displacedUV + off).a;
+        sceneColor += vec4(r, g, b, a) * w;
         total += w;
       }
     }
     sceneColor /= total;
   } else {
-    sceneColor = texture2D(sceneTex, displacedUV);
+    float r = texture2D(sceneTex, displacedUV + aberrOffset).r;
+    float g = texture2D(sceneTex, displacedUV).g;
+    float b = texture2D(sceneTex, displacedUV - aberrOffset).b;
+    float a = texture2D(sceneTex, displacedUV).a;
+    sceneColor = vec4(r, g, b, a);
   }
 
   // Composite the pill's own bg-color OVER the refracted scene. This mirrors

@@ -10,7 +10,7 @@ const SLIDER_DESC =
 
 export function SliderDemo() {
   const sl = useSlider()
-  const rp = useRefractionParams({ specular: 0.4, refraction: 1, blur: 0 })
+  const rp = useRefractionParams({ specular: 0.4, refraction: 1, blur: 0, dispersion: 0.5 })
   return (
     // oxlint-disable-next-line react-perf/jsx-no-jsx-as-prop -- params re-render is intentional
     <DemoShell title="Slider" description={SLIDER_DESC} params={<Params {...rp} />}>

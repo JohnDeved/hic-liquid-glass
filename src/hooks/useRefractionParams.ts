@@ -4,6 +4,7 @@ export const PARAM_CONFIG = [
   { key: 'specular', label: 'Specular Opacity', min: 0, max: 1, step: 0.01 },
   { key: 'refraction', label: 'Refraction Level', min: 0, max: 1, step: 0.01 },
   { key: 'blur', label: 'Blur Level', min: 0, max: 40, step: 0.1 },
+  { key: 'dispersion', label: 'Edge Dispersion', min: 0, max: 1, step: 0.01 },
 ] as const
 
 export type ParamKey = (typeof PARAM_CONFIG)[number]['key']
@@ -24,6 +25,7 @@ export function buildRefraction(
     glassThickness: p.refraction * 70,
     refractiveIndex: 1.5,
     specularOpacity: p.specular,
+    dispersion: p.dispersion,
     ...extra,
   }
 }

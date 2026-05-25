@@ -1,8 +1,13 @@
-import { PARAM_CONFIG, type useRefractionParams } from '../hooks/useRefractionParams'
+import { PARAM_CONFIG, type ParamKey, type useRefractionParams } from '../hooks/useRefractionParams'
+import { useGlassBackend } from './GlassBackend'
 
 type Props = ReturnType<typeof useRefractionParams>
 
+// Params not supported by the CSS / refractive backend.
+const WEBGL_ONLY: ReadonlySet<ParamKey> = new Set<ParamKey>(['dispersion'])
+
 export function Params({ params, set }: Props) {
+  const backend = useGlassBackend()
   return (
     <div className="mt-6 flex flex-col gap-2.5 text-[var(--text-80)]">
       <div className="flex items-center gap-4">
@@ -12,6 +17,7 @@ export function Params({ params, set }: Props) {
         <div className="h-px flex-1 bg-[var(--ui-border)]" />
       </div>
       {PARAM_CONFIG.map(({ key, label, min, max, step }) => {
+        if (backend !== 'webgl' && WEBGL_ONLY.has(key)) return null
         const v = params[key]
         let digits = 0
         if (step < 1) digits = 2

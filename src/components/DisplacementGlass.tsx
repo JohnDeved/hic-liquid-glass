@@ -39,6 +39,7 @@ const UNIFORM_NAMES = [
   'ior',
   'blurAmount',
   'specularOpacity',
+  'dispersion',
   'bezelType',
   'bgColor',
 ] as const
@@ -143,6 +144,7 @@ export function DisplacementGlass({ refraction, className, style, ...rest }: Pro
       gl.uniform1f(u.ior, r.refractiveIndex)
       gl.uniform1f(u.blurAmount, r.blur)
       gl.uniform1f(u.specularOpacity, r.specularOpacity)
+      gl.uniform1f(u.dispersion, r.dispersion ?? 0)
       gl.uniform1i(u.bezelType, r.bezelHeightFn === lip ? 0 : 1)
       gl.uniform4f(u.bgColor, bg.r, bg.g, bg.b, bg.a)
 

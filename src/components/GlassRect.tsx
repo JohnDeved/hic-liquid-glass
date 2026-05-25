@@ -11,6 +11,7 @@ export interface GlassRefractionParams {
   refractiveIndex: number
   specularOpacity: number
   blur: number
+  dispersion?: number
   bezelHeightFn?: (x: number) => number
 }
 
