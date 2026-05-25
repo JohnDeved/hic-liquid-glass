@@ -174,11 +174,12 @@ void main() {
 
   // Chromatic aberration: split R/B sampling along the displacement vector,
   // strongest at the bezel rim, zero in the flat center. Scaled by dispersion.
-  vec2 aberrOffset = (displacement / stageSize) * (0.16 * dispersion * edgeFactor);
+  vec2 aberrOffset = (displacement / stageSize) * (0.35 * dispersion * edgeFactor);
 
-  // Edge-amplified blur: boost sigma toward the rim where the glass is
-  // thickest, mimicking the softer fall-off in Apple's Liquid Glass.
-  float effSigma = blurAmount * (1.0 + 3.0 * dispersion * edgeFactor);
+  // Edge-amplified blur: ADDS its own sigma budget at the rim (driven by
+  // dispersion alone) on top of the user-set base blur. Center stays sharp;
+  // the rim softens like the smeared fall-off in Apple's Liquid Glass.
+  float effSigma = blurAmount + dispersion * edgeFactor * edgeFactor * 10.0;
 
   // Gaussian blur (only when effective sigma > threshold)
   vec4 sceneColor;
@@ -216,6 +217,17 @@ void main() {
   // element's own background on top. The placeholder DOM is invisible (opacity:0)
   // so it doesn't contaminate the HIC capture — bgColor here IS its bg.
   sceneColor.rgb = mix(sceneColor.rgb, bgColor.rgb, bgColor.a);
+
+  // Apple-style rim highlights: continuous bright band around the whole
+  // perimeter (outer rim), plus a fainter secondary band a bit deeper
+  // inside (inner rim). Both are independent of the angle-biased specular
+  // and use the existing specularOpacity to stay user-controllable.
+  vec3 rimTint = vec3(0.88, 0.97, 1.0); // slight cool/cyan cast
+  float outerRim = exp(-pow((distToBorder - 1.2) / 1.4, 2.0));
+  float innerRimDist = bw * 0.75;
+  float innerRim = exp(-pow((distToBorder - innerRimDist) / max(1.0, bw * 0.18), 2.0));
+  float rimAlpha = (outerRim * 0.85 + innerRim * 0.35) * specularOpacity;
+  sceneColor.rgb = mix(sceneColor.rgb, rimTint, rimAlpha);
 
   // Add specular highlight (white overlay)
   float specAlpha = specularValue * specularOpacity;
