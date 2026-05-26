@@ -9,7 +9,7 @@ A side-by-side demo of two complementary techniques for real-time refraction of
 live page content — one cross-browser via WebGL + a custom GLSL shader, one
 Chromium-only via pure CSS.
 
-🌐 **Live demo:** <https://hic-liquid-glass.pages.dev>
+🌐 **Live demo:** <https://hic-liquid-glass.b-j.dev>
 
 [hic]: https://github.com/WICG/html-in-canvas
 
